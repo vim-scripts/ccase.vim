@@ -1,7 +1,7 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        13-Aug-2002 09:35
+" Last Modified:        14-Aug-2002 08:15
 " Version:              1.11
 "
 " $Id: ccase.vim,v 1.25 2002/08/13 13:39:13 dp Exp $
@@ -471,15 +471,16 @@ fun! s:CtCmd(cmd_string)
     exe a:cmd_string." > ".tmpFile
     
     " Now see if a results window is already there
-    if bufnr("[ccase_results]") > 0
-      silent exe "bd! [ccase_results]"
+    let results_bufno = bufnr('ccase_results')
+    if results_bufno > 0
+      exe "bd ".results_bufno
     endif
 
     " Open a new results buffer
-    silent exe "new [ccase_results]"
+    exe "new [ccase_results]"
     "
     " Read in the output from our command
-    silent exe "0r ".tmpFile
+    exe "0r ".tmpFile
 
     " Setup the buffer to be a "special buffer"
     " thanks to T. Scott Urban here, I modeled my settings here off of his code
@@ -491,9 +492,9 @@ fun! s:CtCmd(cmd_string)
 
     " Get rid of temp file
     if has('unix')
-      silent exe "!rm ".tmpFile
+      exe "!rm ".tmpFile
     else
-      silent exe "!del ".tmpFile
+      exe "!del ".tmpFile
     endif
   endif
 endfun " s:CtCmd
