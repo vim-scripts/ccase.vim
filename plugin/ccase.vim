@@ -1,8 +1,8 @@
 " rc file for VIM, clearcase extensions
 " Author:       Douglas L. Potts
 " Created:      17-Feb-2000
-" Last Edit:    26-Sep-2001 09:31
-" Version:      $Revision: 1.7 $
+" Last Edit:    28-Sep-2001 08:02
+" Version:      $Revision: 1.3 $
 " Modifications:
 " 17-Feb-2000 pottsdl   Created from .unixrc mappings
 " 09-Mar-2000 pottsdl   Added Clearcase menu definition here.
@@ -14,8 +14,17 @@
 " 18-Jan-2001 pottsdl   Put this file on my vim macros page.
 " 08-Jun-2001 pottsdl   Versioned this script for upload to vim-online.
 "
-" $Id: ccase.vim,v 1.7 2001/09/07 14:01:32 dp Exp dp $
+" $Id: ccase.vim,v 1.3 2001/09/28 12:04:00 dp Exp $
 " $Log: ccase.vim,v $
+" Revision 1.3  2001/09/28 12:04:00  dp
+" *** empty log message ***
+"
+" Revision 1.2  2001/09/26 14:59:57  dp
+" *** empty log message ***
+"
+" Revision 1.1.1.1  2001/09/10 15:13:17  dp
+" Importing sources
+"
 " Revision 1.7  2001/09/07 14:01:32  dp
 " Change $Rev to $Revision
 "
@@ -41,6 +50,38 @@ let g:Clearcase_loaded = 1
 set statusline=%<%f%h%m%r%=%{$view}\ %{&ff}\ %l,%c%V\ %P
 let def_statusline="%<%f%h%m%r%=%{$view}\ %{&ff}\ %l,%c%V\ %P"
 
+" Don't keep around other version control menus (CVS and RCS)
+" create dummy entry so no warning message come up if they are already gone.
+" DLP - I have cvsmenu.vim and rcs-menu.vim in my plugins directory, only
+"       need one Version Control at a time though.
+"amenu &CVS.dummy echo "dummy"<cr>
+"aunmenu CVS
+"amenu &RCS.dummy echo "dummy"<cr>
+"aunmenu RCS
+
+" If not already found elsewhere.
+if !exists("*OpenIfNew")
+  " ===========================================================================
+  function! OpenIfNew( name )
+  " I used the same logic in several functions, checking if the buffer was
+  " already around, and then deleting and re-loading it, if it was.
+  " -----------------------------------------------------------------------------
+    " Find out if we already have a buffer for it
+    let buf_no = bufnr(expand(a:name))
+
+    " If there is a diffs.tx buffer, delete it
+    if buf_no > 0
+      if version < 600
+        exe 'bd! '.a:name
+      else
+        exe 'bw! '.a:name
+      endif
+    endif
+    " (Re)open the file (update).
+    exe ':sp '.a:name
+  endfunction
+endif
+
 "     Abbreviate cleartool
 cab  ct     !cleartool
 "     check-out buffer (w/ edit afterwards to get rid of RO property)
@@ -64,7 +105,13 @@ cab  ctcov  !cleartool lsco -avob -cview -short -me > $HOME/tmp/results.txt<cr>:
 "     List current clearcase activity
 cab  ctlsa  call <SID>ListActiv()
 fun! s:ListActiv()
+  "let tmpname=tempname()
+  "silent exe '!cleartool lsactiv -cact > '.tmpname
   exe '!cleartool lsactiv -cact'
+  "redir @a
+  "silent exe '!cat '.tmpname
+  "redir END
+  "echo @a
 endfun
 
 "     Set current activity
