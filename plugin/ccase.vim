@@ -1,15 +1,38 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        14-Aug-2002 08:15
-" Version:              1.11
+" Last Modified:        11-Sep-2002 14:58
 "
-" $Id: ccase.vim,v 1.25 2002/08/13 13:39:13 dp Exp $
+" $Id: ccase.vim,v 1.29 2002/09/11 18:58:29 dp Exp $ }}}
 "
-" Modifications:
+" Modifications: {{{
 " $Log: ccase.vim,v $
+" Revision 1.29  2002/09/11 18:58:29  dp
+" Corrected my misuse of 's:vars' as local, when I really was using
+" 'l:vars' (local to the function, and the 'l:' not required).
+"
+" Implemented suggestion by Gary Johnson for the console diff
+" function.  When used from a version tree or file browser,
+" ccase would only append the version qualifier without
+" checking that the filename given didn't already have one.
+" Now works for fully qualified ClearCase filename with version
+" (ex. filename@@/main/foo/1).
+"
+" Revision 1.28  2002/08/26 12:35:12  dp
+" merged changes from 1.26 to provide a scratch buffer name to CtCmd and the string escape from Ingo Karkat (made to 1.25)
+"
+" Revision 1.27  2002/08/26 12:24:42  dp
+" fixed brackets in bufname problem, as was discovered in version 1.25 on
+" vim.sf.net
+"
+" Revision 1.26  2002/08/14 11:37:59  dp
+" modified CtCmd function to take an optional parameter, the name for the
+" results window
+"
 " Revision 1.25  2002/08/13 13:39:13  dp
-" added results buffer capability similar to VTreeExplorer and other recent plugins, eliminates possible naming collisions between multiple users of the plugin on a shared system (ie. Unix/Linux).
+" added results buffer capability similar to VTreeExplorer and other recent
+" plugins, eliminates possible naming collisions between multiple users of the
+" plugin on a shared system (ie. Unix/Linux).
 "
 " Revision 1.24  2002/08/08 20:11:38  dp
 " *** empty log message ***
@@ -62,8 +85,10 @@
 "                       Made Menus use these mappings for ease of use.
 " 17-Feb-2000 pottsdl   Created from .unixrc mappings
 "
-" TODO:  Revise output capture method to use redir to put shell output into a
-"        register, and open a unmodifiable buffer to put it in.
+" DONE:  Revise output capture method to use redir to put shell output into a
+"        register, and open an unmodifiable buffer to put it in.
+"        - Output is redirected to a temp file, then read into an unmodifiable
+"        buffer.
 " TODO:  Find a way to wrap up checkin/checkout operations with the file
 "        explorer plugin.
 " TODO:  Allow visual selections in results windows to be piped into requested
@@ -147,28 +172,6 @@ endif
 "                      Beginning of Function Definitions
 " ===========================================================================
 " {{{
-" If not already found elsewhere.
-if !exists("*OpenIfNew")
-  " ===========================================================================
-  function! OpenIfNew( name )
-  " I used the same logic in several functions, checking if the buffer was
-  " already around, and then deleting and re-loading it, if it was.
-  " ---------------------------------------------------------------------------
-    " Find out if we already have a buffer for it
-    let buf_no = bufnr(expand(a:name))
-
-    " If there is a 'name' buffer, delete it
-    if buf_no > 0
-      if version < 600
-        exe 'bd! '.a:name
-      else
-        exe 'bw! '.a:name
-      endif
-    endif
-    " (Re)open the file (update).
-    exe ':sp '.a:name
-  endfunction
-endif
 
 " ===========================================================================
 function! s:CtConsoleDiff( fname, ask_version )
@@ -178,41 +181,54 @@ function! s:CtConsoleDiff( fname, ask_version )
 " ---------------------------------------------------------------------------
 
   if has("diff")
-    let s:splittype = ""
+    let l:splittype = ""
     if g:ccaseDiffVertSplit == 1
-      let s:splittype=":vert diffsplit "
+      let l:splittype=":vert diffsplit "
     else
-      let s:splittype=":diffsplit "
+      let l:splittype=":diffsplit "
     endif
 
+    " Determine root of the filename.  Necessary when the file we are editting
+    " already as an '@@' version qualifier.
+    let l:fname_and_ver = system('cleartool des -s -cview '.a:fname)
+    let l:fname_and_ver = substitute(l:fname_and_ver, "\n", "", "g")
+
     if (a:ask_version != 0)
-      let s:cmp_to_ver = ""
-      let s:prompt_text = "Give version to compare to: "
+      let l:cmp_to_ver = ""
+      let l:prompt_text = "Give version to compare to: "
       
       " While we aren't getting anything, keep prompting
-      while (s:cmp_to_ver == "")
+      while (l:cmp_to_ver == "")
         if g:ccaseUseDialog == 1
-          let s:cmp_to_ver = inputdialog(s:prompt_text)
+          let l:cmp_to_ver = inputdialog(l:prompt_text)
         else
-          let s:cmp_to_ver = input(s:prompt_text)
+          let l:cmp_to_ver = input(l:prompt_text)
         endif
         echo "\n"
       endwhile
 
       " If they change their mind and want predecessor, allow that
-      if s:cmp_to_ver =~ "pred"
-        let s:cmp_to_ver = system('cleartool des -s -pre '.a:fname)
+      if l:cmp_to_ver =~ "pred"
+        let l:cmp_to_ver = system('cleartool des -s -pre "'.l:fname_and_ver.'"')
       endif
     else
       echohl Question
       echo "Comparing to predecessor..."
-      let s:cmp_to_ver = system('cleartool des -s -pre '.a:fname)
-      let debug=expand(s:cmp_to_ver)
+      let l:cmp_to_ver = system('cleartool des -s -pre "'.l:fname_and_ver.'"')
 
-      echo "Predecessor version: ". debug
+      echo "Predecessor version: ". l:cmp_to_ver
       echohl None
     endif
-    exe s:splittype.a:fname.'@@'.s:cmp_to_ver
+
+    " Strip the file version information out
+    let l:fname = substitute(l:fname_and_ver, "@@[^@]*$", "", "")
+
+    " For the :diffsplit command, enclosing the filename in double quotes does
+    " not work. Thus, the filename's spaces are escaped with \.
+    " On Windows, this is not necessary; but it only works with escaped spaces
+    " on Unix.
+    let l:fname_escaped = escape(l:fname, ' ')
+    exe l:splittype.l:fname_escaped.'@@'.l:cmp_to_ver
   else
     echohl Error
     echo "Unable to use console diff function.  Requires +diff compiled in"
@@ -226,7 +242,7 @@ function! s:IsCheckedout( filename )
 " checked out.
 " Return 1 if checked out, 0 otherwise
 " ===========================================================================
-  let ischeckedout = system('cleartool describe -short ' . a:filename)
+  let ischeckedout = system('cleartool describe -short "'.a:filename.'"')
 
   if ischeckedout =~ "CHECKEDOUT"
     return 1
@@ -255,7 +271,7 @@ function! s:GetComment(text)
   " is executed by the shell, it doesn't get confused by the extra quotes.
   " Single quotes are OK, since the checkout shell command uses double quotes
   " to surround the comment text.
-  let comment = substitute(comment, '"', '\\\0', "g")
+  let comment = substitute(comment, '"\|!', '\\\0', "g")
 
   return comment
 endfunction " GetComment()
@@ -308,20 +324,20 @@ function! s:CtMkelem(filename)
   endif
 
   if g:ccaseMkelemCheckedout == 0
-    let s:CheckinElem = "-ci"
+    let l:CheckinElem = "-ci"
   else
-    let s:CheckinElem = ""
+    let l:CheckinElem = ""
   endif
 
   " Allow to use the default or no comment
   if comment =~ "-nc" || comment == "" || comment == "."
-    exe "!cleartool mkelem ".s:CheckinElem." -nc ".a:filename
+    exe "!cleartool mkelem ".l:CheckinElem." -nc \"".a:filename.'"'
   else
-    exe "!cleartool mkelem ".s:CheckinElem." -c \"".comment."\" ".a:filename
+    exe "!cleartool mkelem ".l:CheckinElem." -c \"".comment."\" \"".a:filename.'"'
   endif
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".a:filename
+    exe "e! ".'"'a:filename.'"'
   endif
 
   if g:ccaseLeaveDirCO == 0
@@ -337,12 +353,12 @@ function! s:CtMkelem(filename)
     " Check the directory back in, ClearCase will prompt for comment
     if checkoutdir =~ '[Yy]'
       " Don't reload the directory upon checking it back in
-      let s:tempAutoLoad = g:ccaseAutoLoad
+      let l:tempAutoLoad = g:ccaseAutoLoad
       let g:ccaseAutoLoad = 0
 
       call s:CtCheckin(elem_basename)
 
-      let g:ccaseAutoLoad = s:tempAutoLoad
+      let g:ccaseAutoLoad = l:tempAutoLoad
     else
       echo "\nNot checking directory back in."
     endif
@@ -354,6 +370,13 @@ endfunction " s:CtMkelem()
 " ===========================================================================
 function! s:CtCheckout(file, reserved)
 " Function to perform a clearcase checkout for the current file
+"
+" TODO:  use range availability, a:firstline a:lastline, and a substitute()
+" command to build the file list to do in one checkout.  Maybe have option to
+" ask if all should be checked out under the same comment or not.  Will have to
+" add a vmap down to the section that uses mapleader to call this.  Would have
+" to add 'range' to end of function definition.
+" - Could also add to CtCheckin
 " ===========================================================================
   let comment = ""
   if g:ccaseNoComment == 0
@@ -377,10 +400,10 @@ function! s:CtCheckout(file, reserved)
     let comment_flag = "-c \"".comment."\""
   endif
 
-  exe "!cleartool co ".reserved_flag." ".comment_flag." ".a:file
+  exe "!cleartool co ".reserved_flag." ".comment_flag." \"".a:file.'"'
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".a:file
+    exe "e! ".'"'.a:file.'"'
   endif
 endfunction " s:CtCheckout()
 
@@ -397,15 +420,15 @@ function! s:CtCheckin(file)
 
   " Allow to use the default or no comment
   if comment =~ "-nc" || comment == "" || comment == "."
-    exe "!cleartool ci -nc ".a:file
+    exe "!cleartool ci -nc \"".a:file.'"'
     "DEBUG echo "!cleartool ci -nc ".a:file
   else
-    exe "!cleartool ci -c \"".comment."\" ".a:file
+    exe "!cleartool ci -c \"".comment."\" \"".a:file.'"'
     "DEBUG echo "!cleartool ci -c \"".comment."\" ".a:file
   endif
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".a:file
+    exe "e! ".'"'.a:file.'"'
   endif
 endfunction " s:CtCheckin()
 
@@ -414,28 +437,17 @@ fun! s:ListActiv(current_act)
 "     List current clearcase activity
 " ===========================================================================
   if a:current_act == "current"
-    "silent exe '!cleartool lsactiv -cact'
-    let @"=system('cleartool lsactiv -cact -short')
-    let s:tmp = substitute(@", "\n", "", "g")
-    echo s:tmp
-  else
-    let tmpFile = tempname()
-    exe '!cleartool lsactiv -short > '.tmpFile
-    " id: unique "string" id
-    " split:
-    "     0 -- don't split
-    "     1 -- split horizontally
-    "     2 -- split vertically
-    " clear: if the buffer should be cleared, if it
-    "        already exists (usually set to 1)
-    exe 'sp '.tmpFile
-    " call ScratchBuffer(1, 1, 1)
-    " exe '0r '.tmpFile
-    " exe '!rm -f '.tmpFile
+    silent let @"=system('cleartool lsactiv -cact -short')
+    let l:tmp = substitute(@", "\n", "", "g")
+    echo l:tmp
+  else " List all actvities
+    call s:CtCmd("!cleartool lsactiv -short", "activity list")
+    nmap <buffer> <2-Leftmouse> 
+          \ :call <SID>SetActiv('<c-r><c-f>')<CR>
   endif
 endfun " s:ListActiv
 cab  ctlsa  call <SID>ListActiv("")<CR>
-cab  ctlsc  call <SID>ListActiv("current")
+cab <silent> ctlsc call <SID>ListActiv("current")
 
 " ===========================================================================
 fun! s:SetActiv(activity)
@@ -443,14 +455,14 @@ fun! s:SetActiv(activity)
 " ===========================================================================
   " If NULL activity is passed in, then prompt for it.
   if a:activity == ""
-    let s:activity = input("Enter activity code to change to: ")
+    let l:activity = input("Enter activity code to change to: ")
     echo "\n"
   else
-    let s:activity = a:activity
+    let l:activity = a:activity
   endif
 
-  if s:activity != ""
-    exe "!cleartool setactiv ".s:activity
+  if l:activity != ""
+    exe "!cleartool setactiv ".l:activity
   else
     echohl Error
     echo "Not changing activity!"
@@ -460,9 +472,12 @@ endfun " s:SetActiv
 cab  ctsta call <SID>SetActiv("")
 
 " ===========================================================================
-fun! s:CtCmd(cmd_string)
+fun! s:CtCmd(cmd_string, ...)
 " Execute ClearCase 'cleartool' command, and put the output into a results
 " buffer.
+"
+" cmd_string - clearcase shell command to execute, and capture output for
+" ...        - optional scratch buffer name string
 " ===========================================================================
   if a:cmd_string != ""
     let tmpFile = tempname()
@@ -470,32 +485,41 @@ fun! s:CtCmd(cmd_string)
     " Capture output in a generated temp file
     exe a:cmd_string." > ".tmpFile
     
-    " Now see if a results window is already there
-    let results_bufno = bufnr('ccase_results')
-    if results_bufno > 0
-      exe "bd ".results_bufno
+    let results_name = "ccase_results"
+
+    " If name is passed in, overwrite our setting
+    if a:0 > 0 && a:1 != ""
+      let results_name = a:1
     endif
 
-    " Open a new results buffer
-    exe "new [ccase_results]"
+    " Now see if a results window is already there
+    let results_bufno = bufnr(results_name)
+    if results_bufno > 0
+      silent exe "bd! ".results_bufno
+    endif
+
+    " Open a new results buffer, brackets are added here so that no false
+    " positives match in trying to determine results_bufno above.
+    silent exe "new [".results_name."]"
     "
     " Read in the output from our command
-    exe "0r ".tmpFile
+    silent exe "0r ".tmpFile
 
     " Setup the buffer to be a "special buffer"
     " thanks to T. Scott Urban here, I modeled my settings here off of his code
     " for VTreeExplorer
     setlocal noswapfile
-    setlocal buftype=nowrite
+    setlocal buftype=nofile
     setlocal bufhidden=delete " d
     setlocal nomodifiable
 
     " Get rid of temp file
     if has('unix')
-      exe "!rm ".tmpFile
+      silent exe "!rm ".tmpFile
     else
-      exe "!del ".tmpFile
+      silent exe "!del ".tmpFile
     endif
+
   endif
 endfun " s:CtCmd
 
@@ -520,44 +544,45 @@ cab  ctcou  call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "u")
 "     check-in buffer (w/ edit afterwards to get RO property)
 cab  ctci   call <SID>CtCheckin('<c-r>=expand("%:p")<cr>')
 "     uncheckout buffer (w/ edit afterwards to get RO property)
-cab  ctunco !cleartool unco % <CR>:e!<cr>
+cab  ctunco !cleartool unco "%" <CR>:e!<cr>
 "     Diff buffer with predecessor version
 cab  ctpdif call <SID>CtConsoleDiff('<c-r>=expand("%:p")<cr>', 0)<cr>
 "     Diff buffer with queried version
 cab  ctqdif call <SID>CtConsoleDiff('<c-r>=expand("%:p")<cr>', 1)<cr>
 "     describe buffer
-cab  ctdesc !cleartool describe %
+cab  ctdesc !cleartool describe "%"
 "     give version of buffer
-cab  ctver  !cleartool describe -aattr version %
+cab  ctver  !cleartool describe -aattr version "%"
 
 "     List my checkouts in the current view and directory
 cab  ctcoc  !cleartool lsco -cview -short -me
 "     List my checkouts in the current view and directory, and it's sub-dir's
 cab  ctcor  call <SID>CtCmd("!cleartool lsco -cview -short -me -recurse")<CR>
 "     List all my checkouts in the current view (ALL VOBS)
-cab  ctcov  call <SID>CtCmd("!cleartool lsco -avob -cview -short -me")
+cab  ctcov  call <SID>CtCmd("!cleartool lsco -avob -cview -short -me",
+      \ "checkouts")<CR>
 
 "       These commands don't work the same on UNIX vs. WinDoze
 if has("unix")
   "     buffer text version tree
-  cab  cttree call <SID>CtCmd("!cleartool lsvtree -all -merge ".expand("%"))<CR>
+  cab  cttree call <SID>CtCmd("!cleartool lsvtree -all -merge \"".expand("%").'"')<CR>
   "     buffer history
-  cab  cthist call <SID>CtCmd("!cleartool lshistory ".expand("%"))<CR>
+  cab  cthist call <SID>CtCmd("!cleartool lshistory \"".expand("%").'"')<CR>
   "     xlsvtree on buffer
-  cab  ctxlsv !xlsvtree % &<CR>
+  cab  ctxlsv !xlsvtree "%" &<CR>
   "     xdiff with predecessor
-  cab  ctdiff !cleartool diff -graphical -pred % &<CR>
+  cab  ctdiff !cleartool diff -graphical -pred "%" &<CR>
   "     Give the current viewname
   cab  ctpwv echohl Question\|echo "Current view is: "$view\|echohl None
 else
   "     buffer text version tree
-  cab  cttree call <SID>CtCmd("!cleartool lsvtree -all -merge ".expand("%"))<CR>
+  cab  cttree call <SID>CtCmd("!cleartool lsvtree -all -merge \"".expand("%").'"')<CR>
   "     buffer history
-  cab  cthist call <SID>CtCmd("!cleartool lshistory ".expand("%"))<CR>
+  cab  cthist call <SID>CtCmd("!cleartool lshistory \"".expand("%").'"')<CR>
   "     xlsvtree on buffer
-  cab  ctxlsv !start clearvtree.exe %<cr>
+  cab  ctxlsv !start clearvtree.exe "%"<cr>
   "     xdiff with predecessor
-  cab  ctdiff !start cleartool xdiff -pred %<CR>
+  cab  ctdiff !start cleartool diff -graphical -pred "%"<CR>
   "     Give the current viewname
   cab  ctpwv !cleartool pwv
 endif
