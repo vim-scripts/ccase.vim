@@ -1,10 +1,10 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        01-Oct-2001 15:53
-" Version:              1.4 (Vim-Online version)
+" Last Modified:        05-Oct-2001 16:27
+" Version:              1.11
 "
-" $Id: ccase.vim,v 1.8 2001/10/01 19:50:01 dp Exp $
+" $Id: ccase.vim,v 1.11 2001/10/30 18:43:29 dp Exp $
 " TODO:  Revise output capture method to use redir to put shell output into a
 "        register, and open a unmodifiable buffer to put it in.
 " TODO:  Add some of my other functions for doing a diff between current file
@@ -12,6 +12,9 @@
 "
 " Modifications:
 " $Log: ccase.vim,v $
+" Revision 1.11  2001/10/30 18:43:29  dp
+" Added new prompt functionality for checkin and checkout.
+"
 " Revision 1.7  2001/10/01 17:31:16  dp
 "  Added full mkelem functionality and cleaned up header comments some.
 "
@@ -33,8 +36,13 @@
 
 if !exists("$view") | finish | endif
 if $view == "." | finish | endif
-if exists('g:Clearcase_loaded') | finish |endif
-let g:Clearcase_loaded = 1
+if exists('g:loaded_ccase') | finish |endif
+let g:loaded_ccase = 1
+
+" Allow to now have to use the dialog box
+if !exists("g:ccaseUseDialog")
+  let g:ccaseUseDialog = 1
+endif
 
 " Setup statusline to show current view
 set statusline=%<%f%h%m%r%=%{$view}\ %{&ff}\ %l,%c%V\ %P
@@ -141,7 +149,42 @@ function! s:CtMkelem(filename)
   " Check the newly made element in (don't need to, -ci option won't leave
   " file).
   "execute "!cleartool ci %"
-endfunction
+endfunction " s:CtMkelem()
+
+function! s:GetComment(type)
+  if a:type == 1
+    let ci_co_text = 'checkout'
+  else
+    let ci_co_text = 'checkin'
+  endif
+
+  echohl Question
+  if has("gui_running") && 
+        \ exists("g:ccaseUseDialog") && 
+        \ g:ccaseUseDialog == 1
+    let comment = inputdialog("Enter ".ci_co_text." comment: ")
+  else
+    let comment = input("Enter ".ci_co_text." comment: ")
+  endif
+  echohl None
+  return comment
+endfunction " GetComment()
+
+function! s:CtCheckout()
+  let file = expand('%:p')
+  let comment = s:GetComment(1)
+  exe "!cleartool co -c \"".comment."\" ".file
+  "echo "!cleartool co -c \"'.comment."\" ".file
+  exe "e! ".file
+endfunction " s:CtCheckout()
+
+function! s:CtCheckin()
+  let file = expand('%:p')
+  let comment = s:GetComment(0)
+  exe "!cleartool ci -c \"".comment."\" ".file
+  " echo "!cleartool ci -c \"".comment."\" ".file
+  exe "e! ".file
+endfunction " s:CtCheckin()
 
 "     Make current file an element in the vob
 cab  ctmk   :call <SID>CtMkelem(expand("%"))<cr>
@@ -149,9 +192,11 @@ cab  ctmk   :call <SID>CtMkelem(expand("%"))<cr>
 "     Abbreviate cleartool
 cab  ct     !cleartool
 "     check-out buffer (w/ edit afterwards to get rid of RO property)
-cab  ctco   !cleartool co % <CR>:e!<CR>
+"cab  ctco   !cleartool co % <CR>:e!<CR>
+cab  ctco   :call <SID>CtCheckout()
 "     check-in buffer (w/ edit afterwards to get RO property)
-cab  ctci   !cleartool ci % <CR>:e!<cr>
+"cab  ctci   !cleartool ci % <CR>:e!<cr>
+cab  ctci   :call <SID>CtCheckin()
 "     uncheckout buffer (w/ edit afterwards to get RO property)
 cab  ctunco !cleartool unco % <CR>:e!<cr>
 "     describe buffer
