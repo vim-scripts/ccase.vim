@@ -1,15 +1,12 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        21-Oct-2002 07:56
+" Last Modified:        11-Sep-2002 14:58
 "
-" $Id: ccase.vim,v 1.31 2002/10/21 12:01:25 dp Exp $ }}}
+" $Id: ccase.vim,v 1.30 2002/09/25 17:06:46 dp Exp $ }}}
 "
 " Modifications: {{{
 " $Log: ccase.vim,v $
-" Revision 1.31  2002/10/21 12:01:25  dp
-" fix from Gary Johnson on cleartool describe, used to determine predecessor version for ctpdif, escaping missing on space in filename, seen on Windows.
-"
 " Revision 1.30  2002/09/25 17:06:46  dp
 " Added buffer local settings to set the current activity, and update the
 " checkout list window on BufEnter.  Also added ability to create an UCM
@@ -218,7 +215,7 @@ function! s:CtConsoleDiff( fname, ask_version )
 
     " Determine root of the filename.  Necessary when the file we are editting
     " already as an '@@' version qualifier.
-    let l:fname_and_ver = system('cleartool des -s -cview "'.a:fname.'"')
+    let l:fname_and_ver = system('cleartool des -s -cview '.a:fname)
     let l:fname_and_ver = substitute(l:fname_and_ver, "\n", "", "g")
 
     if (a:ask_version != 0)
@@ -407,11 +404,16 @@ function! s:CtCheckout(file, reserved)
 " - Could also add to CtCheckin
 " ===========================================================================
   let comment = ""
+
   if g:ccaseNoComment == 0
     echohl Question
     let comment = s:GetComment("Enter checkout comment: ")
     echohl None
   endif
+
+  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+  let myfile = resolve (a:file)
+  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
 
   " Default is checkout reserved, if specified unreserved, then put in
   " appropriate switch
@@ -428,7 +430,10 @@ function! s:CtCheckout(file, reserved)
     let comment_flag = "-c \"".comment."\""
   endif
 
-  exe "!cleartool co ".reserved_flag." ".comment_flag." \"".a:file.'"'
+  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+  "exe "!cleartool co ".reserved_flag." ".comment_flag." \"".a:file.'"'
+  exe "!cleartool co ".reserved_flag." ".comment_flag." \"".myfile.'"'
+  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
 
   if g:ccaseAutoLoad == 1
     exe "e! ".'"'.a:file.'"'
@@ -446,12 +451,18 @@ function! s:CtCheckin(file)
     echohl None
   endif
 
+  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+  let myfile = resolve (a:file)
+  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+
   " Allow to use the default or no comment
   if comment =~ "-nc" || comment == "" || comment == "."
-    exe "!cleartool ci -nc \"".a:file.'"'
+    "exe "!cleartool ci -nc \"".a:file.'"'
+    exe "!cleartool ci -nc \"".myfile.'"'
     "DEBUG echo "!cleartool ci -nc ".a:file
   else
-    exe "!cleartool ci -c \"".comment."\" \"".a:file.'"'
+    "exe "!cleartool ci -c \"".comment."\" \"".a:file.'"'
+    exe "!cleartool ci -c \"".comment."\" \"".myfile.'"'
     "DEBUG echo "!cleartool ci -c \"".comment."\" ".a:file
   endif
 
@@ -459,6 +470,22 @@ function! s:CtCheckin(file)
     exe "e! ".'"'.a:file.'"'
   endif
 endfunction " s:CtCheckin()
+
+" added by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+" ===========================================================================
+function! s:CtUnCheckout(file)
+" Function to perform a clearcase uncheckout for the current file
+" ===========================================================================
+
+  let myfile = resolve (a:file)
+  exe "!cleartool unco -rm \"".myfile.'"'
+  "DEBUG echo "!cleartool ci -nc ".myfile
+
+  if g:ccaseAutoLoad == 1
+    exe "e! ".'"'.a:file.'"'
+  endif
+endfunction " s:CtUnCheckout()
+" added by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
 
 " ===========================================================================
 fun! s:MakeActiv()
@@ -601,8 +628,12 @@ cab  ctco   call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "r")
 cab  ctcou  call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "u")
 "     check-in buffer (w/ edit afterwards to get RO property)
 cab  ctci   call <SID>CtCheckin('<c-r>=expand("%:p")<cr>')
+" GL -- Thu Mar  6 16:48:51 MET 2003
 "     uncheckout buffer (w/ edit afterwards to get RO property)
-cab  ctunco !cleartool unco "%" <CR>:e!<cr>
+cab  ctunco call <SID>CtUnCheckout('<c-r>=expand("%:p")<cr>')
+" GL -- Thu Mar  6 16:48:51 MET 2003
+"     uncheckout buffer (w/ edit afterwards to get RO property)
+cab  ctunco2 !cleartool unco "%" <CR>:e!<cr>
 "     Diff buffer with predecessor version
 cab  ctpdif call <SID>CtConsoleDiff('<c-r>=expand("%:p")<cr>', 0)<cr>
 "     Diff buffer with queried version
@@ -717,6 +748,7 @@ else
   map <unique> <script> <Plug>CleartoolGraphVerTree 
         \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
 endif
+
 " }}}
 " ===========================================================================
 "                                 End of Maps
