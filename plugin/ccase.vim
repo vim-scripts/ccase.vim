@@ -1,12 +1,29 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        03-Apr-2003 13:05
+" Last Modified:        11-Aug-2003 08:03
 "
-" $Id: ccase.vim,v 1.34 2003/04/03 19:48:05 dp Exp $ }}}
+" $Id: ccase.vim,v 1.35 2003/08/12 19:34:16 dp Exp $ }}}
 "
 " Modifications: {{{
 " $Log: ccase.vim,v $
+" Revision 1.35  2003/08/12 19:34:16  dp
+" - Added variable for listing checkouts by anyone, or just 'me'.
+" - Added save of comment text into global var so it is accessable across
+"   starts and stops of vim.
+" - Replaces some echo's with echomsg's so they are saved in vim err list.
+" - Moved autocmds around, so buffer-local kemaps aren't lost by the
+"   autocmds which automatically refresh the listing upon BufEnter.
+" - Added uncheckout functionality into Vim function instead of relying on
+"   shell to do it.
+" - MakeActiv now prompts for an activity comment.
+" - Activity functions no show the activity comment, including the
+"   activity list window.
+" - For the activity and checkout list windows, open new files below and
+"   to the right of the originating list window.
+" - Added check for maps of <unique><script> already being there so
+"   resourcing the plugin doesn't give errors.
+"
 " Revision 1.34  2003/04/03 19:48:05  dp
 " Cleanup from last checkin, and Guillaume Lafage's
 " change for link resolution.
@@ -139,7 +156,7 @@
 "
 " }}}
 
-if exists('g:loaded_ccase') | finish |endif
+if exists('g:loaded_ccase') | finish | endif
 let g:loaded_ccase = 1
 
 " ===========================================================================
@@ -150,7 +167,7 @@ let g:loaded_ccase = 1
 " If using compatible, get out of here
 if &cp
   echohl Error
-  echo "Cannot load ccase.vim with 'compatible' option set!"
+  echomsg "Cannot load ccase.vim with 'compatible' option set!"
   echohl None
   finish
 endif
@@ -158,25 +175,42 @@ endif
 augroup ccase
   au!
 
+  " NOTE:  Put the reload stuff first, otherwise the buffer-local mappings will
+  "        be lost.
+  "
+  " Checkout List window, update listing of checkouts when window is re-entered
+  au BufEnter *checkouts_recurse* silent exe
+        \ "if exists('b:ccaseUsed') == 1|
+        \ bd\|
+        \ let s:listStr = '!cleartool lsco -short -cview -recurse' |
+        \ if g:ccaseJustMe == 1 |
+        \   let s:listStr = s:listStr.' -me' |
+        \ endif |
+        \ call s:CtCmd(s:listStr, 'checkouts_recurse') |
+        \ endif"
+  au BufEnter *checkouts_allvobs* silent exe
+        \ "if exists('b:ccaseUsed') == 1|
+        \ bd\|
+        \ let s:listStr = '!cleartool lsco -short -cview -avobs' |
+        \ if g:ccaseJustMe == 1 |
+        \   let s:listStr = s:listStr.' -me' |
+        \ endif |
+        \ call s:CtCmd(s:listStr, 'checkouts_allvobs') |
+        \ endif"
+
   " Activity List window mappings
-  au BufNewFile *activity_list* nmap <buffer> <2-leftmouse> 
-        \ :call <SID>SetActiv("<c-r>=expand("<cWORD>")<cr>")\|bd<cr>
-  au BufNewFile *activity_list* nnoremap <buffer> <cr> 
-        \ :call <SID>SetActiv("<c-r>=expand("<cWORD>")<cr>")\|bd<cr>
+  " Conconction is because I'm listing the activity comments in addition to the
+  " activity tags
+  au BufNewFile,BufEnter *activity_list* nmap <buffer> <2-leftmouse> :call <SID>CtChangeActiv()<cr><cr>
+  au BufNewFile,BufEnter *activity_list* nmap <buffer> <CR>          :call <SID>CtChangeActiv()<cr><cr>
 
   " Checkout List window mappings
   " - Double-click split-opens file under cursor
   " - Enter on filename split-opens file under cursor
-  au BufNewFile *checkouts* nmap <buffer> <2-leftmouse> <c-w>f
-  au BufNewFile *checkouts* nnoremap <buffer> <CR> <c-w>f
+  au BufNewFile,BufRead,BufEnter *checkouts* nmap <buffer> <2-Leftmouse> :call <SID>OpenInNewWin("<c-r>=expand("<cfile>")<cr>")<cr>
+  "au BufNewFile *checkouts* nnoremap <buffer> <CR> <c-w>f
+  au BufNewFile,BufRead,BufEnter *checkouts* nmap <buffer> <cr> :call <SID>OpenInNewWin("<c-r>=expand("<cfile>")<cr>")<cr>
 
-  " Checkout List window, update listing of checkouts when window is re-entered
-  au BufEnter *checkouts_recurse* silent exe 
-        \ "if exists('b:ccaseUsed') == 1|bd|call s:CtCmd('!cleartool lsco -short -cview -me -recurse',
-        \ 'checkouts_recurse')|endif"
-  au BufEnter *checkouts_allvobs* silent exe 
-        \ "if exists('b:ccaseUsed') == 1|bd\|call s:CtCmd(\'!cleartool lsco -short -cview -me -avob',
-        \ 'checkouts_allvobs')|endif"
 augroup END
 
 " If the *GUI* is running, either use the dialog box or regular prompt
@@ -222,10 +256,25 @@ if !exists("g:ccaseSetNewActiv")
   let g:ccaseSetNewActiv = 1    " Default is to set to new activity
 endif
 
+" Do checkout listings for only the current user
+if !exists("g:ccaseJustMe")
+  let g:ccaseJustMe      = 1    " Default is to list for only the current user
+endif
+
+" On uncheckouts prompt for what to do
+if !exists("g:ccaseAutoRemoveCheckout")
+  let g:ccaseAutoRemoveCheckout = 0 " Default is to prompt the user
+endif
+
 " Setup statusline to show current view, if your environment sets the
 " $view variable when inside a view.
 if exists("$view")
   set statusline=%<%f%h%m%r%=%{$view}\ %{&ff}\ %l,%c%V\ %P
+endif
+
+" Use a global var here to keep comments across restarts
+if !exists("g:ccaseSaveComment")
+  let g:ccaseSaveComment = ""
 endif
 "}}}
 
@@ -257,16 +306,27 @@ function! s:CtConsoleDiff( fname, ask_version )
     if (a:ask_version != 0)
       let l:cmp_to_ver = ""
       let l:prompt_text = "Give version to compare to: "
-      
+
       " While we aren't getting anything, keep prompting
+      echohl Question
       while (l:cmp_to_ver == "")
         if g:ccaseUseDialog == 1
-          let l:cmp_to_ver = inputdialog(l:prompt_text)
+          let l:cmp_to_ver = inputdialog(l:prompt_text, "", "")
         else
           let l:cmp_to_ver = input(l:prompt_text)
+          echo "\n"
         endif
-        echo "\n"
       endwhile
+      echohl None
+
+      " Give user a chance to abort: A version will not likely to be a <ESC>
+      " character. <ESC> character means user press "Cancel":
+      if l:cmp_to_ver == ""
+        echohl WarningMsg
+        echomsg "CCASE diff operation canceled!"
+        echohl None
+        return 1
+      endif
 
       " If they change their mind and want predecessor, allow that
       if l:cmp_to_ver =~ "pred"
@@ -292,10 +352,13 @@ function! s:CtConsoleDiff( fname, ask_version )
     exe l:splittype.l:fname_escaped.'@@'.l:cmp_to_ver
   else
     echohl Error
-    echo "Unable to use console diff function.  Requires +diff compiled in"
+    echomsg "Unable to use console diff function.  Requires +diff compiled in"
     echohl None
+    return 2
   endif
-endfunction
+
+  return 0
+endfunction " s:CtConsoleDiff
 
 " ===========================================================================
 function! s:IsCheckedout( filename )
@@ -303,85 +366,116 @@ function! s:IsCheckedout( filename )
 " checked out.
 " Return 1 if checked out, 0 otherwise
 " ===========================================================================
-  let ischeckedout = system('cleartool describe -short "'.a:filename.'"')
+  let l:ischeckedout = system('cleartool describe -short "'.a:filename.'"')
 
-  if ischeckedout =~ "CHECKEDOUT"
+  if l:ischeckedout =~ "CHECKEDOUT"
     return 1
   endif
   return 0
-endfunction
+endfunction " s:IsCheckedout
 
 " ===========================================================================
 function! s:GetComment(text)
+" Prompt use for checkin/checkout comment. The last entered comment will be
+" the default. User enter comment will be recorded in a global vim variable
+" (g:ccaseSaveComment) so that it will persist across vim starts and stops.
+" s:comment, the return value of this function is:
+"   0 - If user want to abort the opertion.
+"   1 - If user enter a valid comment.
 " ===========================================================================
   echohl Question
-  if has("gui_running") && 
-        \ exists("g:ccaseUseDialog") && 
+  if has("gui_running") &&
+        \ exists("g:ccaseUseDialog") &&
         \ g:ccaseUseDialog == 1
-    let comment = inputdialog(a:text)
+    let l:comment = inputdialog(a:text, g:ccaseSaveComment, "")
   else
-    let comment = input(a:text)
+    let l:comment = input(a:text, g:ccaseSaveComment)
     echo "\n"
   endif
   echohl None
 
-  " If comment entered, had double quotes in the text,
-  " escape them, so the when the:
-  " cleartool checkout -c "<comment_text>"
-  "
-  " is executed by the shell, it doesn't get confused by the extra quotes.
-  " Single quotes are OK, since the checkout shell command uses double quotes
-  " to surround the comment text.
-  let comment = substitute(comment, '"\|!', '\\\0', "g")
+  " If the entered comment is a <ESC>, inform the caller to abort operation.
+  " It should be impossible for one to use a <ESC> character as checkin /
+  " checkout comment, so we're safe here:
+  if l:comment == ""
+    return 1
+  else
+    " Save this comment
+    " If comment entered, had double quotes in the text,
+    " escape them, so the when the:
+    " cleartool checkout -c "<comment_text>"
+    "
+    " is executed by the shell, it doesn't get confused by the extra quotes.
+    " Single quotes are OK, since the checkout shell command uses double quotes
+    " to surround the comment text.
+    let s:comment = substitute(l:comment, '"\|!', '\\\0', "g")
+    " Save the unescaped text
+    let g:ccaseSaveComment = l:comment
+  endif
 
-  return comment
-endfunction " GetComment()
+  return 0
+endfunction " s:GetComment
 
 " ===========================================================================
 function! s:CtMkelem(filename)
 " Make the current file an element of the current directory.
 " ===========================================================================
-  let elem_basename = fnamemodify(a:filename,":p:h")
-  echo "elem_basename: ".elem_basename
+  let l:retVal = 0
+  let l:elem_basename = fnamemodify(a:filename,":p:h")
+  echo "elem_basename: ".l:elem_basename
 
   " Is directory checked out?  If no, ask to check it out.
-  let isCheckedOut = s:IsCheckedout(elem_basename)
-  if isCheckedOut == 0
-    echohl Error
+  let l:isCheckedOut = s:IsCheckedout(elem_basename)
+  if l:isCheckedOut == 0
+    echohl WarningMsg
     echo "WARNING!  Current directory is not checked out."
     echohl Question
-    let checkoutdir = input("Would you like to checkout the current directory (y/n): ")
-    while checkoutdir !~ '[Yy]\|[Nn]'
+    let l:checkoutdir =
+          \ input("Would you like to checkout the current directory (y/n): ")
+    while l:checkoutdir !~ '[Yy]\|[Nn]'
       echo "\n"
-      let checkoutdir = input("Input 'y' for yes, or 'n' for no: ")
+      let l:checkoutdir = input("Input 'y' for yes, or 'n' for no: ")
     endwhile
     echohl None
-    
+
     " No, don't checkout the directory
-    if checkoutdir =~ '[Nn]'
+    if l:checkoutdir =~ '[Nn]'
       echohl Error
-      echo "\nERROR:  Unable to make file an element!\n"
+      echomsg "\nERROR:  Unable to make file an element!\n"
       echohl None
-      return
+      return 1
     else " Else, Yes, checkout the directory
       " Checkout the directory
-      call s:CtCheckout(elem_basename,"r")
-
-      " Check that directory actually got checked out
-      let isCheckedOut = s:IsCheckedout(elem_basename)
-      if isCheckedOut == 0
+      if s:CtCheckout(elem_basename,"r") == 0
+        " Check that directory actually got checked out
+        let l:isCheckedOut = s:IsCheckedout(elem_basename)
+        if l:isCheckedOut == 0
+          echohl Error
+          echomsg "\nERROR!  Exitting, unable to checkout directory.\n"
+          echohl None
+          return 1
+        endif
+      else
         echohl Error
-        echo "\nERROR!  Exitting, unable to checkout directory.\n"
+        echomsg "Canceling make elem operation too!"
         echohl None
-        return
+        return 1
       endif
     endif
   endif
 
-  let comment = ""
+  let l:comment = ""
   if g:ccaseNoComment == 0
     " Make the file an element, ClearCase will prompt for comment
-    let comment = s:GetComment("Enter element creation comment: ")
+    if s:GetComment('Enter element creation comment: ') == 0
+      let l:comment = s:comment
+    else
+      echohl WarningMsg
+      echomsg "Make element canceled!"
+      echohl None
+
+      return 1
+    endif
   endif
 
   if g:ccaseMkelemCheckedout == 0
@@ -403,11 +497,11 @@ function! s:CtMkelem(filename)
 
   if g:ccaseLeaveDirCO == 0
     echohl Question
-    let checkoutdir = 
+    let l:checkoutdir =
           \ input("Would you like to checkin the current directory (y/n): ")
-    while checkoutdir !~ '[Yy]\|[Nn]'
+    while l:checkoutdir !~ '[Yy]\|[Nn]'
       echo "\n"
-      let checkoutdir = input("Input 'y' for yes, or 'n' for no: ")
+      let l:checkoutdir = input("Input 'y' for yes, or 'n' for no: ")
     endwhile
     echohl None
 
@@ -417,7 +511,12 @@ function! s:CtMkelem(filename)
       let l:tempAutoLoad = g:ccaseAutoLoad
       let g:ccaseAutoLoad = 0
 
-      call s:CtCheckin(elem_basename)
+      if s:CtCheckin(elem_basename) == 1
+        let l:retVal = 1
+        echohl WarningMsg
+        echomsg "Checkin canceled!"
+        echohl None
+      endif
 
       let g:ccaseAutoLoad = l:tempAutoLoad
     else
@@ -426,7 +525,8 @@ function! s:CtMkelem(filename)
   else
       echo "\nNot checking directory back in."
   endif
-endfunction " s:CtMkelem()
+  return l:retVal
+endfunction " s:CtMkelem
 
 " ===========================================================================
 function! s:CtCheckout(file, reserved)
@@ -445,34 +545,46 @@ function! s:CtCheckout(file, reserved)
     let l:file = resolve (a:file)
   endif
 
-  let comment = ""
+  let l:comment = ""
   if g:ccaseNoComment == 0
-    echohl Question
-    let comment = s:GetComment("Enter checkout comment: ")
-    echohl None
+    if s:GetComment("Enter checkout comment: ") == 0
+      let l:comment = s:comment
+    else
+      echohl WarningMsg
+      echomsg "Checkout canceled!"
+      echohl None
+      return 1
+    endif
   endif
 
   " Default is checkout reserved, if specified unreserved, then put in
   " appropriate switch
   if a:reserved == "u"
-    let reserved_flag = "-unreserved"
+    let l:reserved_flag = "-unreserved"
   else
-    let reserved_flag = ""
+    let l:reserved_flag = ""
   endif
 
   " Allow to use the default or no comment
-  if comment =~ "-nc" || comment == "" || comment == "."
-    let comment_flag = "-nc"
+  if l:comment =~ "-nc" || l:comment == "" || l:comment == "."
+    let l:comment_flag = "-nc"
   else
-    let comment_flag = "-c \"".comment."\""
+    let l:comment_flag = "-c \"".l:comment."\""
   endif
 
-  exe "!cleartool co ".reserved_flag." ".comment_flag." \"".l:file.'"'
+  exe "!cleartool co ".l:reserved_flag." ".l:comment_flag." \"".l:file.'"'
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".'"'.l:file.'"'
+    if &modified == 1
+      echohl WarningMsg
+      echo "ccase: File modified before checkout, not doing autoload"
+      echo "       to prevent losing changes."
+      echohl None
+    else
+      exe "e! ".'"'.l:file.'"'
+    endif
   endif
-endfunction " s:CtCheckout()
+endfunction " s:CtCheckout
 
 " ===========================================================================
 function! s:CtCheckin(file)
@@ -484,26 +596,29 @@ function! s:CtCheckin(file)
     let l:file = resolve (a:file)
   endif
 
-  let comment = ""
+  let l:comment = ""
   if g:ccaseNoComment == 0
-    echohl Question
-    let comment = s:GetComment("Enter checkin comment: ")
-    echohl None
+    if s:GetComment("Enter checkin comment: ") == 0
+      let l:comment = s:comment
+    else
+      echohl WarningMsg
+      echomsg "Checkout canceled!"
+      echohl None
+      return 1
+    endif
   endif
 
   " Allow to use the default or no comment
-  if comment =~ "-nc" || comment == "" || comment == "."
+  if l:comment =~ "-nc" || l:comment == "" || l:comment == "."
     exe "!cleartool ci -nc \"".l:file.'"'
-    "DEBUG echo "!cleartool ci -nc ".l:file
   else
-    exe "!cleartool ci -c \"".comment."\" \"".l:file.'"'
-    "DEBUG echo "!cleartool ci -c \"".comment."\" ".l:file
+    exe "!cleartool ci -c \"".l:comment."\" \"".l:file.'"'
   endif
 
   if g:ccaseAutoLoad == 1
     exe "e! ".'"'.l:file.'"'
   endif
-endfunction " s:CtCheckin()
+endfunction " s:CtCheckin
 
 " ===========================================================================
 function! s:CtUncheckout(file)
@@ -516,12 +631,16 @@ function! s:CtUncheckout(file)
     let l:file = resolve (a:file)
   endif
 
-  exe "!cleartool unco -rm \"".l:file.'"'
+  if g:ccaseAutoRemoveCheckout == 1
+    exe "!cleartool unco -rm \"".l:file.'"'
+  else
+    exe "!cleartool unco \"".l:file.'"'
+  endif
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".'"'.a:file.'"'
+    exe "e! ".'"'.l:file.'"'
   endif
-endfunction " s:CtUncheckout()
+endfunction " s:CtUncheckout
 
 " ===========================================================================
 fun! s:MakeActiv()
@@ -532,6 +651,16 @@ fun! s:MakeActiv()
   echo "\n"
   echohl None
 
+  let l:comment = ""
+  if s:GetComment("Enter activity comment: ") == 0
+    let l:comment = s:comment
+  else
+    echohl WarningMsg
+    echomsg "Make Activity canceled!"
+    echohl None
+    return 1
+  endif
+
   if l:new_activity != ""
     if g:ccaseSetNewActiv == 0
       let l:set_activity = "-nset"
@@ -539,13 +668,19 @@ fun! s:MakeActiv()
       let l:set_activity = ""
     endif
 
-    exe "!cleartool mkactiv ".l:set_activity." ".l:new_activity
+    " Allow to use the default or no comment
+    if l:comment =~ "-nc" || l:comment == "" || l:comment == "."
+      exe "!cleartool mkactiv ".l:set_activity." -nc ".l:new_activity
+    else
+      exe "!cleartool mkactiv ".l:set_activity." -c \"".l:comment."\" ".
+            \ l:new_activity
+    endif
   else
     echohl Error
-    echo "No activity tag entered.  Command aborted."
+    echomsg "No activity tag entered.  Command aborted."
     echohl None
   endif
-endfun " s:ListActiv
+endfun " s:MakeActiv
 cab  ctmka  call <SID>MakeActiv()
 
 " ===========================================================================
@@ -553,13 +688,13 @@ fun! s:ListActiv(current_act)
 "     List current clearcase activity
 " ===========================================================================
   if a:current_act == "current"
-    silent let @"=system('cleartool lsactiv -cact -short')
+    silent let @"=system("cleartool lsactiv -cact -fmt \'\%n\t\%c\'")
     let l:tmp = substitute(@", "\n", "", "g")
     echohl Question
     echo l:tmp
     echohl None
   else " List all actvities
-    call s:CtCmd("!cleartool lsactiv -short", "activity_list")
+    call s:CtCmd("!cleartool lsactiv -fmt \'\\%n\t\\%c\'", "activity_list")
   endif
 endfun " s:ListActiv
 cab  ctlsa  call <SID>ListActiv("")<CR>
@@ -581,7 +716,7 @@ fun! s:SetActiv(activity)
     exe "!cleartool setactiv ".l:activity
   else
     echohl Error
-    echo "Not changing activity!"
+    echomsg "Not changing activity!"
     echohl None
   endif
 endfun " s:SetActiv
@@ -597,11 +732,27 @@ fun! s:OpenProjExp()
     silent exe "!clearprojexp &"
   else
     echohl Error
-    echo "The ClearCase UCM Project Explorer executable does not exist"
+    echomsg "The ClearCase UCM Project Explorer executable does not exist"
+    " Purposely left next line off of the 'echomsg'
     echo "or is not in your path."
     echohl None
   endif
 endfun " s:OpenProjExp
+cab ctexp call <SID>OpenProjExp()
+
+" ===========================================================================
+fun! s:CtMeStr()
+" Return the string '-me' if the ccaseJustMe variable exists and is set.
+" Used for checkout listings to limit checkouts to just the current user, or to
+" any user with checkouts in the current view.
+" ===========================================================================
+  if g:ccaseJustMe == 1
+    return '"-me"'
+  else
+    return '""'
+  endif
+  return '""'
+endfun " s:CtMeStr
 
 " ===========================================================================
 fun! s:CtCmd(cmd_string, ...)
@@ -612,35 +763,33 @@ fun! s:CtCmd(cmd_string, ...)
 " ...        - optional scratch buffer name string
 " ===========================================================================
   if a:cmd_string != ""
-    let tmpFile = tempname()
+    let l:tmpFile = tempname()
 
     " Capture output in a generated temp file
-    exe a:cmd_string." > ".tmpFile
-    
-    let results_name = "ccase_results"
+    exe a:cmd_string." > ".l:tmpFile
+
+    let l:results_name = "ccase_results"
 
     " If name is passed in, overwrite our setting
     if a:0 > 0 && a:1 != ""
-      let results_name = a:1
+      let l:results_name = a:1
     endif
 
     " Now see if a results window is already there
-    let results_bufno = bufnr(results_name)
-    if results_bufno > 0
-      "silent! exe "bd! ".results_bufno
-      " exe "bd! ".results_bufno
-      exe "bw! ".results_bufno
+    let l:results_bufno = bufnr(l:results_name)
+    if l:results_bufno > 0
+      exe "bw! ".l:results_bufno
     endif
 
     " Open a new results buffer, brackets are added here so that no false
     " positives match in trying to determine results_bufno above.
     " silent exe "topleft new [".results_name."]"
-    exe "topleft new [".results_name."]"
-    
+    exe "topleft new [".l:results_name."]"
+
     setlocal modifiable
     " Read in the output from our command
-    " silent exe "0r ".tmpFile
-    exe "0r ".tmpFile
+    " silent exe "0r ".l:tmpFile
+    exe "0r ".l:tmpFile
 
     " Setup the buffer to be a "special buffer"
     " thanks to T. Scott Urban here, I modeled my settings here off of his code
@@ -653,13 +802,39 @@ fun! s:CtCmd(cmd_string, ...)
 
     " Get rid of temp file
     if has('unix')
-      silent exe "!rm ".tmpFile
+      silent exe "!rm ".l:tmpFile
     else
-      silent exe "!del ".tmpFile
+      silent exe "!del ".l:tmpFile
     endif
 
   endif
 endfun " s:CtCmd
+
+" ===========================================================================
+fu! s:CtChangeActiv()
+" Do the operations for a change in activity from the [activity_list] buffer
+" ===========================================================================
+  let l:activity = substitute(getline("."), '^\(\S\+\)\s.*$', '\1', '')
+  call s:SetActiv(l:activity)
+  bd
+endfun " s:CtChangeActiv
+
+" ===========================================================================
+function! s:OpenInNewWin(filename)
+" Since checkouts buffer and activity buffer are opened at topleft, we want
+" to open new files as bottomright.  This function will do that, while saving
+" user settings, and restoring those settings after opening the new window.
+" ===========================================================================
+  let l:saveSplitBelow = &splitbelow
+  let l:saveSplitRight = &splitright
+
+  set splitbelow
+  set splitright
+  exe "split "a:filename
+
+  let &splitbelow = l:saveSplitBelow
+  let &splitright = l:saveSplitRight
+endfun " s:OpenInNewWin
 
 " }}}
 " ===========================================================================
@@ -697,12 +872,12 @@ cab  ctdesc !cleartool describe "%"
 cab  ctver  !cleartool describe -aattr version "%"
 
 "     List my checkouts in the current view and directory
-cab  ctcoc  !cleartool lsco -cview -short -me
+cab  ctcoc  !cleartool lsco -cview -short <c-r>=<SID>CtMeStr()<cr>
 "     List my checkouts in the current view and directory, and it's sub-dir's
-cab  ctcor  call <SID>CtCmd("!cleartool lsco -short -cview -me -recurse",
+cab  ctcor  call <SID>CtCmd("!cleartool lsco -short -cview ".<c-r>=<SID>CtMeStr()<cr>." -recurse",
       \ "checkouts_recurse")<CR>
 "     List all my checkouts in the current view (ALL VOBS)
-cab  ctcov  call <SID>CtCmd("!cleartool lsco -short -cview -me -avob",
+cab  ctcov  call <SID>CtCmd("!cleartool lsco -short -cview ".<c-r>=<SID>CtMeStr()<cr>." -avob",
       \ "checkouts_allvobs")<CR>
 cab  ctcmt  !cleartool describe -fmt "Comment:\n'\%c'" %
 
@@ -742,7 +917,7 @@ if !hasmapto('<Plug>CleartoolCI')
   nmap <unique> <Leader>ctci <Plug>CleartoolCI
 endif
 if !hasmapto('<Plug>CleartoolCO')
-  nmap <unique> <Leader>ctcor <Plug>CleartoolCO
+  nmap <unique> <Leader>ctco <Plug>CleartoolCO
 endif
 if !hasmapto('<Plug>CleartoolCOUnres')
   nmap <unique> <Leader>ctcou <Plug>CleartoolCOUnres
@@ -771,36 +946,54 @@ endif
 "       For use on a file that has filenames in it:
 "       just put the cursor on the filename and use the map sequence.
 " ===========================================================================
-map <unique> <script> <Plug>CleartoolCI
-      \ :call <SID>CtCheckin('<c-r>=expand("<cfile>")<cr>')<cr>
+if !hasmapto('<Plug>CleartoolCI')
+  map <unique> <script> <Plug>CleartoolCI
+        \ :call <SID>CtCheckin('<c-r>=expand("<cfile>")<cr>')<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolCO
-      \ :call <SID>CtCheckout('<c-r>=expand("<cfile>", "r")<cr>')<cr>
+if !hasmapto('<Plug>CleartoolCO')
+  map <unique> <script> <Plug>CleartoolCO
+        \ :call <SID>CtCheckout('<c-r>=expand("<cfile>", "r")<cr>')<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolCOUnres
-      \ :call <SID>CtCheckout('<c-r>=expand("<cfile>", "u")<cr>')<cr>
+if !hasmapto('<Plug>CleartoolCOUnres')
+  map <unique> <script> <Plug>CleartoolCOUnres
+        \ :call <SID>CtCheckout('<c-r>=expand("<cfile>", "u")<cr>')<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolUnCheckout
-      \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
+if !hasmapto('<Plug>CleartoolUnCheckout')
+  map <unique> <script> <Plug>CleartoolUnCheckout
+        \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolListHistory
-      \ :call <SID>CtCmd("!cleartool lshistory ".expand("<cfile>"))<cr>
+if !hasmapto('<Plug>CleartoolListHistory')
+  map <unique> <script> <Plug>CleartoolListHistory
+        \ :call <SID>CtCmd("!cleartool lshistory ".expand("<cfile>"))<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolConsolePredDiff
-      \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
+if !hasmapto('<Plug>CleartoolConsolePredDiff')
+  map <unique> <script> <Plug>CleartoolConsolePredDiff
+        \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolConsoleQueryDiff
-      \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 1)<cr>
+if !hasmapto('<Plug>CleartoolConsoleQueryDiff')
+  map <unique> <script> <Plug>CleartoolConsoleQueryDiff
+        \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 1)<cr>
+endif
 
-map <unique> <script> <Plug>CleartoolSetActiv
-      \ :call <SID>SetActiv('<c-r>=expand("<cfile>")<cr>')<cr>
+if !hasmapto('<Plug>CleartoolSetActiv')
+  map <unique> <script> <Plug>CleartoolSetActiv
+        \ :call <SID>SetActiv('<c-r>=expand("<cfile>")<cr>')<cr>
+endif
 
-if has("unix")
-  map <unique> <script> <Plug>CleartoolGraphVerTree 
-        \ :!xlsvtree <c-r>=expand("<cfile>")<cr> &
-else
-  map <unique> <script> <Plug>CleartoolGraphVerTree 
-        \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
+if !hasmapto('<Plug>CleartoolSetActiv')
+  if has("unix")
+    map <unique> <script> <Plug>CleartoolGraphVerTree
+          \ :!xlsvtree <c-r>=expand("<cfile>")<cr> &
+  else
+    map <unique> <script> <Plug>CleartoolGraphVerTree
+          \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
+  endif
 endif
 " }}}
 " ===========================================================================
