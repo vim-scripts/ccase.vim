@@ -3,10 +3,15 @@
 " Created:              17-Feb-2000
 " Last Modified:        11-Sep-2002 14:58
 "
-" $Id: ccase.vim,v 1.29 2002/09/11 18:58:29 dp Exp $ }}}
+" $Id: ccase.vim,v 1.30 2002/09/25 17:06:46 dp Exp $ }}}
 "
 " Modifications: {{{
 " $Log: ccase.vim,v $
+" Revision 1.30  2002/09/25 17:06:46  dp
+" Added buffer local settings to set the current activity, and update the
+" checkout list window on BufEnter.  Also added ability to create an UCM
+" activity (mkactiv).  See updates to the documentation (:h ccase-plugin).
+"
 " Revision 1.29  2002/09/11 18:58:29  dp
 " Corrected my misuse of 's:vars' as local, when I really was using
 " 'l:vars' (local to the function, and the 'l:' not required).
@@ -19,7 +24,8 @@
 " (ex. filename@@/main/foo/1).
 "
 " Revision 1.28  2002/08/26 12:35:12  dp
-" merged changes from 1.26 to provide a scratch buffer name to CtCmd and the string escape from Ingo Karkat (made to 1.25)
+" merged changes from 1.26 to provide a scratch buffer name to CtCmd and the
+" string escape from Ingo Karkat (made to 1.25)
 "
 " Revision 1.27  2002/08/26 12:24:42  dp
 " fixed brackets in bufname problem, as was discovered in version 1.25 on
@@ -98,6 +104,13 @@
 "        ClearCase when the shell command is run.   (18-Jan-2002)
 "
 " DONE:  Maybe write up some documentation.     (12-Jan-2002)
+" DONE:  Work in using this mapping for the results window if window has the
+"        list of activities in it. (17-Sep-2002)
+" DONE:  If in a listing of checkouts, allow double-click to split-open
+"        the file under the cursor. 17-Sep-2002)
+" DONE:  Use the following autocmd local to the buffer for the checkouts result
+"        buffer, so that when user re-enters the window that it is updated.
+"        (17-Sep-2002)
 "
 " }}}
 
@@ -117,12 +130,18 @@ if &cp
   finish
 endif
 
-" TODO:  Work in using this mapping for the results window if window has the
-"        list of activities in it.
-"nmap <buffer> <2-leftmouse> :call <SNR>22_SetActiv("<c-r>=expand("<cWORD>")<cr>")<cr>
-" TODO:  If in a listing of checkouts, allow double-click to split-open
-"        the file under the cursor
-"nmap <buffer> <2-leftmouse> <c-w>f
+augroup ccase
+  au!
+  au BufNewFile *activity_list* nmap <buffer> <2-leftmouse> 
+        \ :call <SNR>22_SetActiv("<c-r>=expand("<cWORD>")<cr>")
+  au BufNewFile *checkouts* nmap <buffer> <2-leftmouse> <c-w>f
+  au BufEnter *checkouts_recurse* silent exe 
+        \ "bd|call s:CtCmd('!cleartool lsco -short -cview -me -recurse',
+        \ 'checkouts_recurse')"
+  au BufEnter *checkouts_allvobs* silent exe 
+        \ "bd\|call s:CtCmd(\'!cleartool lsco -short -cview -me -avob',
+        \ 'checkouts_allvobs')"
+augroup END
 
 " If the *GUI* is running, either use the dialog box or regular prompt
 if !exists("g:ccaseUseDialog")
@@ -159,6 +178,12 @@ endif
 " Allow for leaving directory checked out on Mkelem
 if !exists("g:ccaseLeaveDirCO")
   let g:ccaseLeaveDirCO = 0     " Default is to prompt to check dir back in
+endif
+
+" Upon making a new clearcase activity, default behavior is to change the
+" current activiy to the newly created activity.
+if !exists("g:ccaseSetNewActiv")
+  let g:ccaseSetNewActiv = 1    " Default is to set to new activity
 endif
 
 " Setup statusline to show current view, if your environment sets the
@@ -433,6 +458,31 @@ function! s:CtCheckin(file)
 endfunction " s:CtCheckin()
 
 " ===========================================================================
+fun! s:MakeActiv()
+"     Create a clearcase activity
+" ===========================================================================
+  echohl Question
+  let l:new_activity = input ("Enter new activity tag: ")
+  echo "\n"
+  echohl None
+
+  if l:new_activity != ""
+    if g:ccaseSetNewActiv == 0
+      let l:set_activity = "-nset"
+    else
+      let l:set_activity = ""
+    endif
+
+    exe "!cleartool mkactiv ".l:set_activity." ".l:new_activity
+  else
+    echohl Error
+    echo "No activity tag entered.  Command aborted."
+    echohl None
+  endif
+endfun " s:ListActiv
+cab  ctmka  call <SID>MakeActiv()
+
+" ===========================================================================
 fun! s:ListActiv(current_act)
 "     List current clearcase activity
 " ===========================================================================
@@ -441,7 +491,7 @@ fun! s:ListActiv(current_act)
     let l:tmp = substitute(@", "\n", "", "g")
     echo l:tmp
   else " List all actvities
-    call s:CtCmd("!cleartool lsactiv -short", "activity list")
+    call s:CtCmd("!cleartool lsactiv -short", "activity_list")
     nmap <buffer> <2-Leftmouse> 
           \ :call <SID>SetActiv('<c-r><c-f>')<CR>
   endif
@@ -495,15 +545,20 @@ fun! s:CtCmd(cmd_string, ...)
     " Now see if a results window is already there
     let results_bufno = bufnr(results_name)
     if results_bufno > 0
-      silent exe "bd! ".results_bufno
+      "silent! exe "bd! ".results_bufno
+      " exe "bd! ".results_bufno
+      exe "bw! ".results_bufno
     endif
 
     " Open a new results buffer, brackets are added here so that no false
     " positives match in trying to determine results_bufno above.
-    silent exe "new [".results_name."]"
-    "
+    " silent exe "topleft new [".results_name."]"
+    exe "topleft new [".results_name."]"
+    
+    setlocal modifiable
     " Read in the output from our command
-    silent exe "0r ".tmpFile
+    " silent exe "0r ".tmpFile
+    exe "0r ".tmpFile
 
     " Setup the buffer to be a "special buffer"
     " thanks to T. Scott Urban here, I modeled my settings here off of his code
@@ -557,10 +612,11 @@ cab  ctver  !cleartool describe -aattr version "%"
 "     List my checkouts in the current view and directory
 cab  ctcoc  !cleartool lsco -cview -short -me
 "     List my checkouts in the current view and directory, and it's sub-dir's
-cab  ctcor  call <SID>CtCmd("!cleartool lsco -cview -short -me -recurse")<CR>
+cab  ctcor  call <SID>CtCmd("!cleartool lsco -short -cview -me -recurse",
+      \ "checkouts_recurse")<CR>
 "     List all my checkouts in the current view (ALL VOBS)
-cab  ctcov  call <SID>CtCmd("!cleartool lsco -avob -cview -short -me",
-      \ "checkouts")<CR>
+cab  ctcov  call <SID>CtCmd("!cleartool lsco -short -cview -me -avob",
+      \ "checkouts_allvobs")<CR>
 
 "       These commands don't work the same on UNIX vs. WinDoze
 if has("unix")
@@ -704,12 +760,15 @@ if (has("gui_running") && &guioptions !~# "M") ||
         \ :ctdesc<cr>
   amenu 60.430 &Clearcase.&Version\ Tree<Tab>:ctxlsv
         \ :ctxlsv<cr>
+  amenu 60.435 &Clearcase.-SEP4-        :
   amenu 60.440 &Clearcase.&List\ Current\ Activity<Tab>:ctlsc
         \ :ctlsc<cr>
   amenu 60.450 &Clearcase.&List\ Activities<Tab>:ctlsa
         \ :ctlsa<cr>
   amenu 60.460 &Clearcase.&Set\ Current\ Activity<Tab>:ctsta
         \ :ctsta<cr>
+  amenu 60.470 &Clearcase.&Create\ New\ Current\ Activity<Tab>:ctmka
+        \ :ctmka<cr>
   amenu 60.500 &Clearcase.-SEP2-        :
   amenu 60.510 &Clearcase.Di&ff<Tab>:ctdiff
         \ :ctdiff<cr>
