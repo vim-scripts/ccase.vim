@@ -1,13 +1,19 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        01-Nov-2001 16:45
+" Last Modified:        11-Jan-2002 15:55
 " Version:              1.11
 "
-" $Id: ccase.vim,v 1.14 2001/11/01 21:50:00 dp Exp $
+" $Id: ccase.vim,v 1.17 2002/01/11 20:57:53 dp Exp $
 "
 " Modifications:
 " $Log: ccase.vim,v $
+" Revision 1.17  2002/01/11 20:57:53  dp
+" *** empty log message ***
+"
+" Revision 1.16  2002/01/04 20:36:51  dp
+" Added echohl for prompts and error messages.
+"
 " Revision 1.14  2001/11/01 21:50:00  dp
 " Added options to mkelem function, fixed bug with autoloading directory.
 "
@@ -38,8 +44,6 @@
 "
 " TODO:  Revise output capture method to use redir to put shell output into a
 "        register, and open a unmodifiable buffer to put it in.
-" TODO:  Add some of my other functions for doing a diff between current file
-"        and predecessor using the new diff functionality in Vim 6.0.
 " TODO:  Maybe write up some documentation.
 " }}}
 
@@ -48,7 +52,13 @@ let g:loaded_ccase = 1
 
 " If the *GUI* is running, either use the dialog box or regular prompt
 if !exists("g:ccaseUseDialog")
-  let g:ccaseUseDialog = 1      " Default is to use dialog box
+  " If GUI is compiled in, default to use the dialog box
+  if has("gui")
+    let g:ccaseUseDialog = 1
+  else
+    " If no GUI compiled in, default to no dialog box
+    let g:ccaseUseDialog = 0
+  endif
 endif
 
 " Allow user to skip being prompted for comments all the time
@@ -153,11 +163,13 @@ function! s:CtConsoleDiff( fname, ask_version )
         let s:cmp_to_ver = system('cleartool des -s -pre '.a:fname)
       endif
     else
+      echohl Question
       echo "Comparing to predecessor..."
       let s:cmp_to_ver = system('cleartool des -s -pre '.a:fname)
       let debug=expand(s:cmp_to_ver)
 
       echo "Predecessor version: ". debug
+      echohl None
     endif
     exe s:splittype.a:fname.'@@'.s:cmp_to_ver
   else
@@ -214,16 +226,21 @@ function! s:CtMkelem(filename)
   " Is directory checked out?  If no, ask to check it out.
   let isCheckedOut = s:IsCheckedout(elem_basename)
   if isCheckedOut == 0
+    echohl Error
     echo "WARNING!  Current directory is not checked out."
+    echohl Question
     let checkoutdir = input("Would you like to checkout the current directory (y/n): ")
     while checkoutdir !~ '[Yy]\|[Nn]'
       echo "\n"
       let checkoutdir = input("Input 'y' for yes, or 'n' for no: ")
     endwhile
+    echohl None
     
     " No, don't checkout the directory
     if checkoutdir =~ '[Nn]'
+      echohl Error
       echo "\nERROR:  Unable to make file an element!\n"
+      echohl None
       return
     else " Else, Yes, checkout the directory
       " Checkout the directory
@@ -232,7 +249,9 @@ function! s:CtMkelem(filename)
       " Check that directory actually got checked out
       let isCheckedOut = s:IsCheckedout(elem_basename)
       if isCheckedOut == 0
+        echohl Error
         echo "\nERROR!  Exitting, unable to checkout directory.\n"
+        echohl None
         return
       endif
     endif
@@ -264,12 +283,14 @@ function! s:CtMkelem(filename)
   endif
 
   if g:ccaseLeaveDirCO == 0
+    echohl Question
     let checkoutdir = 
           \ input("Would you like to checkin the current directory (y/n): ")
     while checkoutdir !~ '[Yy]\|[Nn]'
       echo "\n"
       let checkoutdir = input("Input 'y' for yes, or 'n' for no: ")
     endwhile
+    echohl None
 
     " Check the directory back in, ClearCase will prompt for comment
     if checkoutdir =~ '[Yy]'
@@ -298,7 +319,9 @@ function! s:CtCheckout(file)
 " ===========================================================================
   let comment = ""
   if g:ccaseNoComment == 0
+    echohl Question
     let comment = s:GetComment("Enter checkout comment: ")
+    echohl None
   endif
 
   " Allow to use the default or no comment
@@ -321,7 +344,9 @@ function! s:CtCheckin(file)
 " ===========================================================================
   let comment = ""
   if g:ccaseNoComment == 0
+    echohl Question
     let comment = s:GetComment("Enter checkin comment: ")
+    echohl None
   endif
 
   " Allow to use the default or no comment
@@ -374,9 +399,9 @@ cab  ctmk   call <SID>CtMkelem(expand("%"))
 "     Abbreviate cleartool
 cab  ct     !cleartool
 "     check-out buffer (w/ edit afterwards to get rid of RO property)
-cab  ctco   call <SID>CtCheckout("<c-r>=expand("%:p")<cr>")
+cab  ctco   call <SID>CtCheckout('<c-r>=expand("%:p")<cr>')
 "     check-in buffer (w/ edit afterwards to get RO property)
-cab  ctci   call <SID>CtCheckin("<c-r>=expand("%:p")<cr>")
+cab  ctci   call <SID>CtCheckin('<c-r>=expand("%:p")<cr>')
 "     uncheckout buffer (w/ edit afterwards to get RO property)
 cab  ctunco !cleartool unco % <CR>:e!<cr>
 "     Diff buffer with predecessor version
@@ -411,7 +436,7 @@ if has("unix")
   "cab  ctdiff !cleartool xdiff -pred % &<CR>
   cab  ctdiff !cleartool diff -graphical -pred % &<CR>
   "     Give the current viewname
-  cab  ctpwv echo "Current view is: "$view
+  cab  ctpwv echohl Question\|echo "Current view is: "$view\|echohl None
 else
   "     buffer text version tree
   cab  cttree !cleartool lsvtree -all -merge %
@@ -467,26 +492,45 @@ endif
 " nmap <unique> <script> <Plug>CleartoolCO
 "       \ :!cleartool co -c <C-R>=input("Enter checkout comment: ")<CR>
 "       \ <c-r>=expand("<cfile>")<cr>
-nmap <unique> <script> <Plug>CleartoolCI
-      \ :call <SID>CtCheckin("<c-r>=expand("<cfile>")<cr>")<cr>
-nmap <unique> <script> <Plug>CleartoolCO
-      \ :call <SID>CtCheckout("<c-r>=expand("<cfile>")<cr>")<cr>
-nmap <unique> <script> <Plug>CleartoolUnCheckout
-      \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
-nmap <unique> <script> <Plug>CleartoolListHistory
-      \ :!cleartool lshistory <c-r>=expand("<cfile>")<cr>
-      \ > $HOME/tmp/results.txt<cr>:call OpenIfNew('~/tmp/results.txt')<cr>
-nmap <unique> <script> <Plug>CleartoolConsolePredDiff
-      \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
-nmap <unique> <script> <Plug>CleartoolConsoleQueryDiff
-      \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 1)<cr>
+if !hasmapto('<Plug>CleartoolCI')
+  nmap <unique> <script> <Plug>CleartoolCI
+        \ :call <SID>CtCheckin('<c-r>=expand("<cfile>")<cr>')<cr>
+endif
 
-if has("unix")
-  nmap <unique> <script> <Plug>CleartoolGraphVerTree 
-        \ :!xlsvtree <c-r>=expand("<cfile>")<cr> &
-else
-  nmap <unique> <script> <Plug>CleartoolGraphVerTree 
-        \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
+if !hasmapto('<Plug>CleartoolCO')
+  nmap <unique> <script> <Plug>CleartoolCO
+        \ :call <SID>CtCheckout('<c-r>=expand("<cfile>")<cr>')<cr>
+endif
+
+if !hasmapto('<Plug>CleartoolUnCheckout')
+  nmap <unique> <script> <Plug>CleartoolUnCheckout
+        \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
+endif
+
+if !hasmapto('<Plug>CleartoolListHistory')
+  nmap <unique> <script> <Plug>CleartoolListHistory
+        \ :!cleartool lshistory <c-r>=expand("<cfile>")<cr>
+        \ > $HOME/tmp/results.txt<cr>:call OpenIfNew('~/tmp/results.txt')<cr>
+endif
+
+if !hasmapto('<Plug>CleartoolConsolePredDiff')
+  nmap <unique> <script> <Plug>CleartoolConsolePredDiff
+        \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
+endif
+
+if !hasmapto('<Plug>CleartoolConsoleQueryDiff')
+  nmap <unique> <script> <Plug>CleartoolConsoleQueryDiff
+        \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 1)<cr>
+endif
+
+if !hasmapto('<Plug>CleartoolGraphVerTree')
+  if has("unix")
+    nmap <unique> <script> <Plug>CleartoolGraphVerTree 
+          \ :!xlsvtree <c-r>=expand("<cfile>")<cr> &
+  else
+    nmap <unique> <script> <Plug>CleartoolGraphVerTree 
+          \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
+  endif
 endif
 " }}}
 
