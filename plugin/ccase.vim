@@ -1,15 +1,26 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        11-Jan-2002 15:55
+" Last Modified:        05-Apr-2002 16:49
 " Version:              1.11
 "
-" $Id: ccase.vim,v 1.17 2002/01/11 20:57:53 dp Exp $
+" $Id: ccase.vim,v 1.22 2002/04/05 21:43:02 dp Exp $
 "
 " Modifications:
 " $Log: ccase.vim,v $
-" Revision 1.17  2002/01/11 20:57:53  dp
+" Revision 1.22  2002/04/05 21:43:02  dp
+" Added capability to checkout a file unreserved, either via 'cab' command line,
+" or menu.
+"
+" Revision 1.21  2002/01/18 16:13:48  dp
 " *** empty log message ***
+"
+" Revision 1.20  2002/01/16 18:00:01  dp
+" Revised setactivity and lsactivity handling.
+"
+" Revision 1.19  2002/01/15 15:22:27  dp
+" Fixed bug with normal mode mappings, used in conjunction with file checkout
+" listings.
 "
 " Revision 1.16  2002/01/04 20:36:51  dp
 " Added echohl for prompts and error messages.
@@ -44,11 +55,28 @@
 "
 " TODO:  Revise output capture method to use redir to put shell output into a
 "        register, and open a unmodifiable buffer to put it in.
-" TODO:  Maybe write up some documentation.
+" DONE:  Intelligently escape quotes in comments inputted, so it doesn't confuse
+"        ClearCase when the shell command is run.   (18-Jan-2002)
+"
+" DONE:  Maybe write up some documentation.     (12-Jan-2002)
+"
 " }}}
 
 if exists('g:loaded_ccase') | finish |endif
 let g:loaded_ccase = 1
+
+" ===========================================================================
+"                           Setup Default Behaviors
+" ===========================================================================
+"{{{
+" Default name for temporary file for output redirection
+if !exists("g:ccaseTmpFile")
+  if has("unix")
+    let g:ccaseTmpFile = "/tmp/results.txt"
+  else
+    let g:ccaseTmpFile = "c:\\temp\\results.txt"
+  endif
+endif
 
 " If the *GUI* is running, either use the dialog box or regular prompt
 if !exists("g:ccaseUseDialog")
@@ -92,15 +120,7 @@ endif
 if exists("$view")
   set statusline=%<%f%h%m%r%=%{$view}\ %{&ff}\ %l,%c%V\ %P
 endif
-
-" Don't keep around other version control menus (CVS and RCS)
-" create dummy entry so no warning message come up if they are already gone.
-" DLP - I have cvsmenu.vim and rcs-menu.vim in my plugins directory, only
-"       need one Version Control at a time though.
-amenu &CVS.dummy echo "dummy"<cr>
-aunmenu CVS
-amenu &RCS.dummy echo "dummy"<cr>
-aunmenu RCS
+"}}}
 
 " ===========================================================================
 "                      Beginning of Function Definitions
@@ -196,12 +216,6 @@ endfunction
 " ===========================================================================
 function! s:GetComment(text)
 " ===========================================================================
-  " if a:type == 1
-  "   let ci_co_text = 'checkout'
-  " else
-  "   let ci_co_text = 'checkin'
-  " endif
-
   echohl Question
   if has("gui_running") && 
         \ exists("g:ccaseUseDialog") && 
@@ -212,6 +226,16 @@ function! s:GetComment(text)
     echo "\n"
   endif
   echohl None
+
+  " If comment entered, had double quotes in the text,
+  " escape them, so the when the:
+  " cleartool checkout -c "<comment_text>"
+  "
+  " is executed by the shell, it doesn't get confused by the extra quotes.
+  " Single quotes are OK, since the checkout shell command uses double quotes
+  " to surround the comment text.
+  let comment = substitute(comment, '"', '\\\0', "g")
+
   return comment
 endfunction " GetComment()
 
@@ -219,7 +243,6 @@ endfunction " GetComment()
 function! s:CtMkelem(filename)
 " Make the current file an element of the current directory.
 " ===========================================================================
-  "let ct_mkelem_basename = expand("%:p:h")
   let elem_basename = fnamemodify(a:filename,":p:h")
   echo "elem_basename: ".elem_basename
 
@@ -244,7 +267,7 @@ function! s:CtMkelem(filename)
       return
     else " Else, Yes, checkout the directory
       " Checkout the directory
-      call s:CtCheckout(elem_basename)
+      call s:CtCheckout(elem_basename,"r")
 
       " Check that directory actually got checked out
       let isCheckedOut = s:IsCheckedout(elem_basename)
@@ -255,8 +278,6 @@ function! s:CtMkelem(filename)
         return
       endif
     endif
-  "else
-  "  echo "\nDEBUG:  Directory already checked out.\n"
   endif
 
   let comment = ""
@@ -307,14 +328,10 @@ function! s:CtMkelem(filename)
   else
       echo "\nNot checking directory back in."
   endif
-
-  " Check the newly made element in (don't need to, -ci option won't leave
-  " file).
-  "execute "!cleartool ci %"
 endfunction " s:CtMkelem()
 
 " ===========================================================================
-function! s:CtCheckout(file)
+function! s:CtCheckout(file, reserved)
 " Function to perform a clearcase checkout for the current file
 " ===========================================================================
   let comment = ""
@@ -324,14 +341,22 @@ function! s:CtCheckout(file)
     echohl None
   endif
 
+  " Default is checkout reserved, if specified unreserved, then put in
+  " appropriate switch
+  if a:reserved == "u"
+    let reserved_flag = "-unreserved"
+  else
+    let reserved_flag = ""
+  endif
+
   " Allow to use the default or no comment
   if comment =~ "-nc" || comment == "" || comment == "."
-    exe "!cleartool co -nc ".a:file
-    "DEBUG echo "!cleartool co -nc ".a:file
+    let comment_flag = "-nc"
   else
-    exe "!cleartool co -c \"".comment."\" ".a:file
-    "DEBUG echo "!cleartool co -c \"'.comment."\" ".a:file
+    let comment_flag = "-c \"".comment."\""
   endif
+
+  exe "!cleartool co ".reserved_flag." ".comment_flag." ".a:file
 
   if g:ccaseAutoLoad == 1
     exe "e! ".a:file
@@ -364,26 +389,43 @@ function! s:CtCheckin(file)
 endfunction " s:CtCheckin()
 
 " ===========================================================================
-fun! s:ListActiv()
+fun! s:ListActiv(current_act)
 "     List current clearcase activity
 " ===========================================================================
-  exe '!cleartool lsactiv -cact'
-endfun
-"cab  ctlsa  call <SID>ListActiv()<cr>
-cmap ctlsa  call <SID>ListActiv()
-
-" ===========================================================================
-fun! s:SetActiv()
-"     Set current activity
-" ===========================================================================
-  let activity = input("Enter activity code to change to:")
-  echo "\n"
-  if activity != ""
-    exe "!cleartool setactiv ".activity
+  if a:current_act == "current"
+    "silent exe '!cleartool lsactiv -cact'
+    let @"=system('cleartool lsactiv -cact -short')
+    let s:tmp = substitute(@", "\n", "", "g")
+    echo s:tmp
+  else
+    exe '!cleartool lsactiv -short > '.g:ccaseTmpFile
+    exe 'sp '.g:ccaseTmpFile
   endif
 endfun
-"cab  ctsta call <SID>SetActiv()<cr>
-cmap  ctsta call <SID>SetActiv()<cr>
+cab  ctlsa  call <SID>ListActiv("")<CR>
+cab  ctlsc  call <SID>ListActiv("current")
+
+" ===========================================================================
+fun! s:SetActiv(activity)
+"     Set current activity
+" ===========================================================================
+  " If NULL activity is passed in, then prompt for it.
+  if a:activity == ""
+    let s:activity = input("Enter activity code to change to: ")
+    echo "\n"
+  else
+    let s:activity = a:activity
+  endif
+
+  if s:activity != ""
+    exe "!cleartool setactiv ".s:activity
+  else
+    echohl Error
+    echo "Not changing activity!"
+    echohl None
+  endif
+endfun
+cab  ctsta call <SID>SetActiv("")
 " }}}
 " ===========================================================================
 "                         End of Function Definitions
@@ -399,7 +441,9 @@ cab  ctmk   call <SID>CtMkelem(expand("%"))
 "     Abbreviate cleartool
 cab  ct     !cleartool
 "     check-out buffer (w/ edit afterwards to get rid of RO property)
-cab  ctco   call <SID>CtCheckout('<c-r>=expand("%:p")<cr>')
+cab  ctco   call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "r")
+"     check-out buffer (...) unreserved
+cab  ctcou  call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "u")
 "     check-in buffer (w/ edit afterwards to get RO property)
 cab  ctci   call <SID>CtCheckin('<c-r>=expand("%:p")<cr>')
 "     uncheckout buffer (w/ edit afterwards to get RO property)
@@ -417,33 +461,32 @@ cab  ctver  !cleartool describe -aattr version %
 cab  ctcoc  !cleartool lsco -cview -short -me
 "     List my checkouts in the current view and directory, and it's sub-dir's
 cab  ctcor  !cleartool lsco -cview -short -me -recurse 
-      \ > $HOME/tmp/results.txt<cr>:call OpenIfNew('~/tmp/results.txt')<cr>
+      \ > <C-R>=ccaseTmpFile<CR><CR>:call OpenIfNew(ccaseTmpFile)<CR>
 "     List all my checkouts in the current view (ALL VOBS)
 cab  ctcov  !cleartool lsco -avob -cview -short -me 
-      \ > $HOME/tmp/results.txt<cr>:call OpenIfNew('~/tmp/results.txt')<cr>
+      \ > <C-R>=ccaseTmpFile<CR><CR>:call OpenIfNew(ccaseTmpFile)<CR>
 
 "       These commands don't work the same on UNIX vs. WinDoze
 if has("unix")
   "     buffer text version tree
   cab  cttree !cleartool lsvtree -all -merge %
-        \ > $HOME/tmp/results.txt<CR>:sp ~/tmp/results.txt<CR>
+        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
   "     buffer history
   cab  cthist !cleartool lshistory %
-        \ > $HOME/tmp/results.txt<CR>:sp ~/tmp/results.txt<CR>
+        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
   "     xlsvtree on buffer
   cab  ctxlsv !xlsvtree % &<CR>
   "     xdiff with predecessor
-  "cab  ctdiff !cleartool xdiff -pred % &<CR>
   cab  ctdiff !cleartool diff -graphical -pred % &<CR>
   "     Give the current viewname
   cab  ctpwv echohl Question\|echo "Current view is: "$view\|echohl None
 else
   "     buffer text version tree
   cab  cttree !cleartool lsvtree -all -merge %
-        \ > c:/temp/results.txt<CR>:sp c:/temp/results.txt<CR>
+        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
   "     buffer history
   cab  cthist !cleartool lshistory %
-        \ > c:/temp/results.txt<CR>:sp c:/temp/results.txt<CR>
+        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
   "     xlsvtree on buffer
   cab  ctxlsv !start clearvtree.exe %<cr>
   "     xdiff with predecessor
@@ -463,7 +506,10 @@ if !hasmapto('<Plug>CleartoolCI')
   nmap <unique> <Leader>ctci <Plug>CleartoolCI
 endif
 if !hasmapto('<Plug>CleartoolCO')
-  nmap <unique> <Leader>ctco <Plug>CleartoolCO
+  nmap <unique> <Leader>ctcor <Plug>CleartoolCO
+endif
+if !hasmapto('<Plug>CleartoolCOUnres')
+  nmap <unique> <Leader>ctcou <Plug>CleartoolCOUnres
 endif
 if !hasmapto('<Plug>CleartoolUnCheckout')
   nmap <unique> <Leader>ctunco <Plug>CleartoolUnCheckout
@@ -480,60 +526,48 @@ endif
 if !hasmapto('<Plug>CleartoolConsoleQueryDiff')
   nmap <unique> <Leader>qdif <Plug>CleartoolConsoleQueryDiff
 endif
+if !hasmapto('<Plug>CleartoolSetActiv')
+  nmap <unique> <Leader>ctsta <Plug>CleartoolSetActiv
+endif
 
 " ===========================================================================
 " Global Maps:
 "       For use on a file that has filenames in it:
 "       just put the cursor on the filename and use the map sequence.
 " ===========================================================================
-" nmap <unique> <script> <Plug>CleartoolCI
-"       \ !cleartool ci -c <C-R>=input("Enter checkout comment: ")<CR>
-"       \ <c-r>=expand("<cfile>")<cr>
-" nmap <unique> <script> <Plug>CleartoolCO
-"       \ :!cleartool co -c <C-R>=input("Enter checkout comment: ")<CR>
-"       \ <c-r>=expand("<cfile>")<cr>
-if !hasmapto('<Plug>CleartoolCI')
-  nmap <unique> <script> <Plug>CleartoolCI
-        \ :call <SID>CtCheckin('<c-r>=expand("<cfile>")<cr>')<cr>
-endif
+map <unique> <script> <Plug>CleartoolCI
+      \ :call <SID>CtCheckin('<c-r>=expand("<cfile>")<cr>')<cr>
 
-if !hasmapto('<Plug>CleartoolCO')
-  nmap <unique> <script> <Plug>CleartoolCO
-        \ :call <SID>CtCheckout('<c-r>=expand("<cfile>")<cr>')<cr>
-endif
+map <unique> <script> <Plug>CleartoolCO
+      \ :call <SID>CtCheckout('<c-r>=expand("<cfile>", "r")<cr>')<cr>
 
-if !hasmapto('<Plug>CleartoolUnCheckout')
-  nmap <unique> <script> <Plug>CleartoolUnCheckout
-        \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
-endif
+map <unique> <script> <Plug>CleartoolCOUnres
+      \ :call <SID>CtCheckout('<c-r>=expand("<cfile>", "u")<cr>')<cr>
 
-if !hasmapto('<Plug>CleartoolListHistory')
-  nmap <unique> <script> <Plug>CleartoolListHistory
-        \ :!cleartool lshistory <c-r>=expand("<cfile>")<cr>
-        \ > $HOME/tmp/results.txt<cr>:call OpenIfNew('~/tmp/results.txt')<cr>
-endif
+map <unique> <script> <Plug>CleartoolUnCheckout
+      \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
 
-if !hasmapto('<Plug>CleartoolConsolePredDiff')
-  nmap <unique> <script> <Plug>CleartoolConsolePredDiff
-        \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
-endif
+map <unique> <script> <Plug>CleartoolListHistory
+      \ :!cleartool lshistory <c-r>=expand("<cfile>")<cr>
+      \ > <C-R>=ccaseTmpFile<CR><CR>:call OpenIfNew(ccaseTmpFile)<CR>
 
-if !hasmapto('<Plug>CleartoolConsoleQueryDiff')
-  nmap <unique> <script> <Plug>CleartoolConsoleQueryDiff
-        \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 1)<cr>
-endif
+map <unique> <script> <Plug>CleartoolConsolePredDiff
+      \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
 
-if !hasmapto('<Plug>CleartoolGraphVerTree')
-  if has("unix")
-    nmap <unique> <script> <Plug>CleartoolGraphVerTree 
-          \ :!xlsvtree <c-r>=expand("<cfile>")<cr> &
-  else
-    nmap <unique> <script> <Plug>CleartoolGraphVerTree 
-          \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
-  endif
+map <unique> <script> <Plug>CleartoolConsoleQueryDiff
+      \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 1)<cr>
+
+map <unique> <script> <Plug>CleartoolSetActiv
+      \ :call <SID>SetActiv('<c-r>=expand("<cfile>")<cr>')<cr>
+
+if has("unix")
+  map <unique> <script> <Plug>CleartoolGraphVerTree 
+        \ :!xlsvtree <c-r>=expand("<cfile>")<cr> &
+else
+  map <unique> <script> <Plug>CleartoolGraphVerTree 
+        \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
 endif
 " }}}
-
 " ===========================================================================
 "                                 End of Maps
 " ===========================================================================
@@ -562,13 +596,15 @@ if (has("gui_running") && &guioptions !~# "M") ||
   " Clearcase menu
   " Hint: Using <Tab> makes alignment easy (Menus can have non-fixed
   "       width fonts, so just spaces are out of the question.
-  amenu 60.300 &Clearcase.Check&out<Tab>:ctco
+  amenu 60.300 &Clearcase.Check&out\ (Reserved)<Tab>:ctco
         \ :ctco<cr>
-  amenu 60.310 &Clearcase.Check&in<Tab>:ctci
+  amenu 60.310 &Clearcase.Check&out\ Unreserved<Tab>:ctcou
+        \ :ctcou<cr>
+  amenu 60.320 &Clearcase.Check&in<Tab>:ctci
         \ :ctci<cr>
-  amenu 60.320 &Clearcase.&Uncheckout<Tab>:ctunco
+  amenu 60.330 &Clearcase.&Uncheckout<Tab>:ctunco
         \ :ctunco<cr>
-  amenu 60.330 &Clearcase.&Make\ Element<Tab>:ctmk
+  amenu 60.340 &Clearcase.&Make\ Element<Tab>:ctmk
         \ :ctmk<cr>
   amenu 60.400 &Clearcase.-SEP1-        :
   amenu 60.410 &Clearcase.&History<Tab>:cthist
@@ -577,9 +613,11 @@ if (has("gui_running") && &guioptions !~# "M") ||
         \ :ctdesc<cr>
   amenu 60.430 &Clearcase.&Version\ Tree<Tab>:ctxlsv
         \ :ctxlsv<cr>
-  amenu 60.440 &Clearcase.&List\ Current\ Activity<Tab>:ctlsa
+  amenu 60.440 &Clearcase.&List\ Current\ Activity<Tab>:ctlsc
+        \ :ctlsc<cr>
+  amenu 60.450 &Clearcase.&List\ Activities<Tab>:ctlsa
         \ :ctlsa<cr>
-  amenu 60.450 &Clearcase.&Set\ Current\ Activity<Tab>:ctsta
+  amenu 60.460 &Clearcase.&Set\ Current\ Activity<Tab>:ctsta
         \ :ctsta<cr>
   amenu 60.500 &Clearcase.-SEP2-        :
   amenu 60.510 &Clearcase.Di&ff<Tab>:ctdiff

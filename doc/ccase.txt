@@ -1,4 +1,5 @@
-*ccase.txt*   For Vim version 6.0.  Last change: 2002 Jan 11
+*ccase.txt*                  For Vim version 6.0.
+             LAST MODIFICATION: "Fri, 05 Apr 2002 16:52:10 (dp)"
 
 
 		  VIM REFERENCE MANUAL    by Douglas Potts
@@ -29,69 +30,74 @@ in your |vimrc| file: >
 2. Commands
 
 Common Commands:~
-							*ctco*
-Checkout out the current file.  This will prompt for a checkout comment
-depending on the value of |g:ccaseNoComment|.
+							*:ctco*
+Checkout out the current file (default is checkout reserved).  This will
+prompt for a checkout comment depending on the value of |g:ccaseNoComment|.
 
-							*ctci*
+							*:ctcou*
+Checkout out the current file unreserved.  This will prompt for a checkout
+comment depending on the value of |g:ccaseNoComment|.
+
+							*:ctci*
 Check in the current file.  This will prompt for a checkin comment depending
 on the value of |g:ccaseNoComment|.
 
-							*ctmk*
+							*:ctmk*
 Make the current file a VOB element.  This will, depending on the value of
 |g:ccaseNoComment|, prompt for a checkout comment (for the directory of the
 new element, if the directory has not already been checked out), a element
 creation comment for the file, and prompt for a directory checkin comment
 depending on the value of |g:ccaseLeaveDirCO|.
 
-							*ctunco*
+							*:ctunco*
 Un-checkout the current file.  Utilizes the behavior of the ClearCase(R)
 "cleartool uncheckout" command to prompt the user for whether or not to copy
 the view private version to a .keep file.
 
-							*ctcoc*
+							*::ctcoc*
 List the checkouts for the current user, for this view, in the current working
 directory.
 
-							*ctcor*
+							*:ctcor*
 List the checkouts for the current user, for this view, in the current working
 directory, and all of it's subdirectories.  This redirects the output from the
-"cleartool lsco" command to a results.txt file in the user's ~/tmp directory.
-"And splits the window, and opens the results file in that new window.
+"cleartool lsco" command to a results file |g:ccaseTmpFile|, and splits the
+window, and opens the results file in that new window.
 
-							*ctcov*
+							*:ctcov*
 List the checkouts for the current user, for this view, in any VOB.  This
-redirects the output from the "cleartool lsco" command to a results.txt file
-in the user's ~/tmp directory.  And splits the window, and opens the results
-file in that new window.
+redirects the output from the "cleartool lsco" command to a results file
+|g:ccaseTmpFile|, and splits the window, and opens the results file in that
+new window.
 
 
 Uncommmon Commands:~
-							*cthist*
+							*:cthist*
 List the version history for the current file.  This redirects the output from
-the "cleartool lshist" command to a results.txt file in the user's ~/tmp
-directory.  And splits the window, and opens the results file in that new
-window.
+the "cleartool lshist" command to a results file |g:ccaseTmpFile|, and splits
+the window, and opens the results file in that new window.
 
-							*ctdesc*
+							*:ctdesc*
 Lists the element description for the current file.  This redirects the output
-from the "cleartool describe" command to a results.txt file in the user's
-~/tmp directory.  And splits the window, and opens the results file in that
-new window.
+from the "cleartool describe" command to a results file |g:ccaseTmpFile|, and
+splits the window, and opens the results file in that new window.
 
-							*ctpwv*
+							*:ctpwv*
 Echo the current working view to the status line.
 
-							*ctxlsv*
+							*:ctxlsv*
 Spawn off the ClearCase(R) xlsvtree (graphical version tree viewer) for the
 current file.
+							*:ctdiff*
+Spawn off the clearcase graphical diff tool to display differences between the
+current file and its immediate predecessor.
 
-							*ctpdif*
+							*:ctpdif*
 Perform a |:diffsplit| on the predecessor version of the current file.
 Depending on the value of |g:ccaseDiffVertSplit|, the split will be vertical
 or horizontal.
 
-							*ctqdif*
+							*:ctqdif*
 Perform a |:diffsplit| on a queried predecessor version of the current file.
 Depending on the value of |g:ccaseDiffVertSplit|, the split will be vertical
 or horizontal.
@@ -102,10 +108,15 @@ ClearCase(R) Unified Change Management extensions (UCM)~
 ClearCase(R) has a software extension called UCM that assists in the creation
 of version branches, version synchronization, and program baselining.
 
-							*ctlsa*
-List the current working/default UCM activity.
+							*:ctlsc*
+Echo the current working/default UCM activity to the status line.
 
-							*ctsta*
+							*:ctlsa*
+List all of the UCM activities for this view.  This redirects the output from
+the "cleartool lsactivty" command to a results file, and splits open a new
+window containing these results.
+
+							*:ctsta*
 Set the current working/default UCM activity.
 
 ==============================================================================
@@ -120,39 +131,44 @@ can then put the cursor on one of the filenames in the list, and perform a
 check in operation on that file.
 
 							*<Leader>ctci*
-Performs a check in operation on the filename under the cursor.  See |ctci|
+Performs a check in operation on the filename under the cursor.  See |:ctci|
 for the operational details of what the |ccase-plugin| does for a file check
 in.
 
-							*<Leader>ctco*
-Performs a check in operation on the filename under the cursor.  See |ctco|
-for the operational details of what the |ccase-plugin| does for a file check
-out.
+							*<Leader>ctcor*
+Performs a reserved check out operation on the filename under the cursor.  See
+|:ctco| for the operational details of what the |ccase-plugin| does for a file
+check out.
+
+							*<Leader>ctcou*
+Performs an unreserved check out operation on the filename under the cursor.
+See |:ctcou| for the operational details of what the |ccase-plugin| does for a
+file check out.
 
 							*<Leader>ctunco*
-Performs a check in operation on the filename under the cursor.  See |ctunco|
-for the operational details of what the |ccase-plugin| does for a unchecking
-out a file.
+Performs an uncheckout operation on the filename under the cursor.  See
+|:ctunco| for the operational details of what the |ccase-plugin| does for a
+unchecking out a file.
 
 							*<Leader>cthist*
-Performs a check in operation on the filename under the cursor.  See |cthist|
-for the operational details of what the |ccase-plugin| does for a listing of
-version history.
-
-							*<Leader>ctxl*
-Performs a check in operation on the filename under the cursor.  See |ctxlsv|
-for the operational details of what the |ccase-plugin| does for a version tree
+Performs a list history operation on the filename under the cursor.  See
+|:cthist| for the operational details of what the |ccase-plugin| does for a
 listing of version history.
 
+							*<Leader>ctxl*
+Performs a open element version tree  operation on the filename under the
+cursor.  See |:ctxlsv| for the operational details of what the |ccase-plugin|
+does for a version tree listing of version history.
+
 							*<Leader>ctpdif*
-Performs a check in operation on the filename under the cursor.  See |ctpdif|
-for the operational details of what the |ccase-plugin| does for diff'ing
-against the file's predecessor version.
+Performs a diff with previous version operation on the filename under the
+cursor.  See |:ctpdif| for the operational details of what the |ccase-plugin|
+does for diff'ing against the file's predecessor version.
 
 							*<Leader>ctqdif*
-Performs a check in operation on the filename under the cursor.  See |ctpdif|
-for the operational details of what the |ccase-plugin| does for diff'ing
-against a queried predecessor to the file.
+Performs a diff with queried operation on the filename under the cursor.  See
+|:ctqdif| for the operational details of what the |ccase-plugin| does for
+diff'ing against a queried predecessor to the file.
 
 
 ==============================================================================
@@ -177,7 +193,19 @@ what they do.  The format for changing the behavior from the default is: >
   let g:ccaseUseDialog=0	" Don't use dialog boxes
   .
   .
+
+Or for a temporary change, from the command line: >
+  :let ccaseUseDialog=0
 ~
+                                                      *g:ccaseTmpFile*
+String         		(Unix default:          "/tmp/results.txt"
+			 Windows/DOS default:   "c:\temp\results.txt")
+
+Filename (including path) in which to redirect output from shell commands.
+Used in |:cthist| to redirect output from ClearCase command into a file, and
+that file is opened to display the results, and allow for operations on those
+results.
+
                                                       *g:ccaseUseDialog*
 Integer boolean		(default for gvim:  1=Use a dialog box for input,
 			 default for vim:   0=Use other input method)
@@ -192,7 +220,7 @@ back in the input history to reuse earlier entries.
 						      *g:ccaseNoComment*
 Integer boolean		(default:  0=Ask for comments)
 
-Clearcase allow for providing checkout and checkin comments per file.  If you
+ClearCase allow for providing checkout and checkin comments per file.  If you
 don't use this comment functionality, and don't want to be prompted for it
 upon file checkout or checkin, then set g:ccaseNoComment=1.
 
