@@ -1,12 +1,37 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        11-Sep-2002 14:58
+" Last Modified:        03-Apr-2003 13:05
 "
-" $Id: ccase.vim,v 1.30 2002/09/25 17:06:46 dp Exp $ }}}
+" $Id: ccase.vim,v 1.34 2003/04/03 19:48:05 dp Exp $ }}}
 "
 " Modifications: {{{
 " $Log: ccase.vim,v $
+" Revision 1.34  2003/04/03 19:48:05  dp
+" Cleanup from last checkin, and Guillaume Lafage's
+" change for link resolution.
+"
+" Revision 1.33  2003/04/03 18:12:09  dp
+" - Added menu item and function to open the ClearTool Project Explorer
+"   (clearprojexp).
+" - Put text coloring on for display of the current activity.
+" - Added 'Enter' key equivalent buffer-local mappings for the activity and
+"   checkout list windows (equivalent operation to that of Double-click
+"   '<2-Leftmouse>' in vim-ese).
+" - Also fixed problem with initial opening of the 'list' windows where they
+"   would have the initial data, and the autocmd would kick in appending the
+"   "updated" data, so multiple listing of the same file would occur.
+"
+" Revision 1.32  2002/10/21 12:22:11  dp
+" added "show comment" command to menu and a "cabbrev" ctcmt, and
+" changed autocmd for activity list so that if an activity is chosen via a double
+" click on the mouse, that the window goes away (I think this is the desired
+" behavior).
+"
+" Revision 1.31  2002/10/21 12:01:25  dp
+" fix from Gary Johnson on cleartool describe, used to determine predecessor
+" version for ctpdif, escaping missing on space in filename, seen on Windows.
+"
 " Revision 1.30  2002/09/25 17:06:46  dp
 " Added buffer local settings to set the current activity, and update the
 " checkout list window on BufEnter.  Also added ability to create an UCM
@@ -132,15 +157,26 @@ endif
 
 augroup ccase
   au!
+
+  " Activity List window mappings
   au BufNewFile *activity_list* nmap <buffer> <2-leftmouse> 
-        \ :call <SNR>22_SetActiv("<c-r>=expand("<cWORD>")<cr>")
+        \ :call <SID>SetActiv("<c-r>=expand("<cWORD>")<cr>")\|bd<cr>
+  au BufNewFile *activity_list* nnoremap <buffer> <cr> 
+        \ :call <SID>SetActiv("<c-r>=expand("<cWORD>")<cr>")\|bd<cr>
+
+  " Checkout List window mappings
+  " - Double-click split-opens file under cursor
+  " - Enter on filename split-opens file under cursor
   au BufNewFile *checkouts* nmap <buffer> <2-leftmouse> <c-w>f
+  au BufNewFile *checkouts* nnoremap <buffer> <CR> <c-w>f
+
+  " Checkout List window, update listing of checkouts when window is re-entered
   au BufEnter *checkouts_recurse* silent exe 
-        \ "bd|call s:CtCmd('!cleartool lsco -short -cview -me -recurse',
-        \ 'checkouts_recurse')"
+        \ "if exists('b:ccaseUsed') == 1|bd|call s:CtCmd('!cleartool lsco -short -cview -me -recurse',
+        \ 'checkouts_recurse')|endif"
   au BufEnter *checkouts_allvobs* silent exe 
-        \ "bd\|call s:CtCmd(\'!cleartool lsco -short -cview -me -avob',
-        \ 'checkouts_allvobs')"
+        \ "if exists('b:ccaseUsed') == 1|bd\|call s:CtCmd(\'!cleartool lsco -short -cview -me -avob',
+        \ 'checkouts_allvobs')|endif"
 augroup END
 
 " If the *GUI* is running, either use the dialog box or regular prompt
@@ -215,7 +251,7 @@ function! s:CtConsoleDiff( fname, ask_version )
 
     " Determine root of the filename.  Necessary when the file we are editting
     " already as an '@@' version qualifier.
-    let l:fname_and_ver = system('cleartool des -s -cview '.a:fname)
+    let l:fname_and_ver = system('cleartool des -s -cview "'.a:fname.'"')
     let l:fname_and_ver = substitute(l:fname_and_ver, "\n", "", "g")
 
     if (a:ask_version != 0)
@@ -403,17 +439,18 @@ function! s:CtCheckout(file, reserved)
 " to add 'range' to end of function definition.
 " - Could also add to CtCheckin
 " ===========================================================================
-  let comment = ""
+  if a:file == ""
+    let l:file = resolve (expand("%:p"))
+  else
+    let l:file = resolve (a:file)
+  endif
 
+  let comment = ""
   if g:ccaseNoComment == 0
     echohl Question
     let comment = s:GetComment("Enter checkout comment: ")
     echohl None
   endif
-
-  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
-  let myfile = resolve (a:file)
-  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
 
   " Default is checkout reserved, if specified unreserved, then put in
   " appropriate switch
@@ -430,13 +467,10 @@ function! s:CtCheckout(file, reserved)
     let comment_flag = "-c \"".comment."\""
   endif
 
-  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
-  "exe "!cleartool co ".reserved_flag." ".comment_flag." \"".a:file.'"'
-  exe "!cleartool co ".reserved_flag." ".comment_flag." \"".myfile.'"'
-  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+  exe "!cleartool co ".reserved_flag." ".comment_flag." \"".l:file.'"'
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".'"'.a:file.'"'
+    exe "e! ".'"'.l:file.'"'
   endif
 endfunction " s:CtCheckout()
 
@@ -444,6 +478,12 @@ endfunction " s:CtCheckout()
 function! s:CtCheckin(file)
 " Function to perform a clearcase checkin for the current file
 " ===========================================================================
+  if a:file == ""
+    let l:file = resolve (expand("%:p"))
+  else
+    let l:file = resolve (a:file)
+  endif
+
   let comment = ""
   if g:ccaseNoComment == 0
     echohl Question
@@ -451,41 +491,37 @@ function! s:CtCheckin(file)
     echohl None
   endif
 
-  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
-  let myfile = resolve (a:file)
-  " modified by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
-
   " Allow to use the default or no comment
   if comment =~ "-nc" || comment == "" || comment == "."
-    "exe "!cleartool ci -nc \"".a:file.'"'
-    exe "!cleartool ci -nc \"".myfile.'"'
-    "DEBUG echo "!cleartool ci -nc ".a:file
+    exe "!cleartool ci -nc \"".l:file.'"'
+    "DEBUG echo "!cleartool ci -nc ".l:file
   else
-    "exe "!cleartool ci -c \"".comment."\" \"".a:file.'"'
-    exe "!cleartool ci -c \"".comment."\" \"".myfile.'"'
-    "DEBUG echo "!cleartool ci -c \"".comment."\" ".a:file
+    exe "!cleartool ci -c \"".comment."\" \"".l:file.'"'
+    "DEBUG echo "!cleartool ci -c \"".comment."\" ".l:file
   endif
 
   if g:ccaseAutoLoad == 1
-    exe "e! ".'"'.a:file.'"'
+    exe "e! ".'"'.l:file.'"'
   endif
 endfunction " s:CtCheckin()
 
-" added by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
 " ===========================================================================
-function! s:CtUnCheckout(file)
-" Function to perform a clearcase uncheckout for the current file
+function! s:CtUncheckout(file)
+"       Function to perform a clearcase uncheckout
 " ===========================================================================
 
-  let myfile = resolve (a:file)
-  exe "!cleartool unco -rm \"".myfile.'"'
-  "DEBUG echo "!cleartool ci -nc ".myfile
+  if a:file == ""
+    let l:file = resolve (expand("%:p"))
+  else
+    let l:file = resolve (a:file)
+  endif
+
+  exe "!cleartool unco -rm \"".l:file.'"'
 
   if g:ccaseAutoLoad == 1
     exe "e! ".'"'.a:file.'"'
   endif
-endfunction " s:CtUnCheckout()
-" added by GL to resolve file link -- Thu Mar  6 15:54:57 MET 2003
+endfunction " s:CtUncheckout()
 
 " ===========================================================================
 fun! s:MakeActiv()
@@ -519,11 +555,11 @@ fun! s:ListActiv(current_act)
   if a:current_act == "current"
     silent let @"=system('cleartool lsactiv -cact -short')
     let l:tmp = substitute(@", "\n", "", "g")
+    echohl Question
     echo l:tmp
+    echohl None
   else " List all actvities
     call s:CtCmd("!cleartool lsactiv -short", "activity_list")
-    nmap <buffer> <2-Leftmouse> 
-          \ :call <SID>SetActiv('<c-r><c-f>')<CR>
   endif
 endfun " s:ListActiv
 cab  ctlsa  call <SID>ListActiv("")<CR>
@@ -550,6 +586,22 @@ fun! s:SetActiv(activity)
   endif
 endfun " s:SetActiv
 cab  ctsta call <SID>SetActiv("")
+
+" ===========================================================================
+fun! s:OpenProjExp()
+"     Function to open the UCM ClearCase Project Explorer.  Mainly checks
+"     that executable is there and runs it if it is, otherwise it echoes an
+"     error saying that you don't have it.
+" ===========================================================================
+  if executable('clearprojexp')
+    silent exe "!clearprojexp &"
+  else
+    echohl Error
+    echo "The ClearCase UCM Project Explorer executable does not exist"
+    echo "or is not in your path."
+    echohl None
+  endif
+endfun " s:OpenProjExp
 
 " ===========================================================================
 fun! s:CtCmd(cmd_string, ...)
@@ -596,6 +648,7 @@ fun! s:CtCmd(cmd_string, ...)
     setlocal noswapfile
     setlocal buftype=nofile
     setlocal bufhidden=delete " d
+    let      b:ccaseUsed=1    " Keep from loading data twice the first time
     setlocal nomodifiable
 
     " Get rid of temp file
@@ -623,17 +676,17 @@ cab  ctmk   call <SID>CtMkelem(expand("%"))
 "     Abbreviate cleartool
 cab  ct     !cleartool
 "     check-out buffer (w/ edit afterwards to get rid of RO property)
-cab  ctco   call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "r")
+" cab  ctco   call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "r")
+cab  ctco   call <SID>CtCheckout('', "r")
 "     check-out buffer (...) unreserved
-cab  ctcou  call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "u")
+" cab  ctcou  call <SID>CtCheckout('<c-r>=expand("%:p")<cr>', "u")
+cab  ctcou  call <SID>CtCheckout('', "u")
 "     check-in buffer (w/ edit afterwards to get RO property)
-cab  ctci   call <SID>CtCheckin('<c-r>=expand("%:p")<cr>')
-" GL -- Thu Mar  6 16:48:51 MET 2003
+" cab  ctci   call <SID>CtCheckin('<c-r>=expand("%:p")<cr>')
+cab  ctci   call <SID>CtCheckin('')
 "     uncheckout buffer (w/ edit afterwards to get RO property)
-cab  ctunco call <SID>CtUnCheckout('<c-r>=expand("%:p")<cr>')
-" GL -- Thu Mar  6 16:48:51 MET 2003
-"     uncheckout buffer (w/ edit afterwards to get RO property)
-cab  ctunco2 !cleartool unco "%" <CR>:e!<cr>
+" cab  ctunco call <SID>CtUncheckout('<c-r>=expand("%:p")<cr>')
+cab  ctunco call <SID>CtUncheckout('')
 "     Diff buffer with predecessor version
 cab  ctpdif call <SID>CtConsoleDiff('<c-r>=expand("%:p")<cr>', 0)<cr>
 "     Diff buffer with queried version
@@ -651,6 +704,7 @@ cab  ctcor  call <SID>CtCmd("!cleartool lsco -short -cview -me -recurse",
 "     List all my checkouts in the current view (ALL VOBS)
 cab  ctcov  call <SID>CtCmd("!cleartool lsco -short -cview -me -avob",
       \ "checkouts_allvobs")<CR>
+cab  ctcmt  !cleartool describe -fmt "Comment:\n'\%c'" %
 
 "       These commands don't work the same on UNIX vs. WinDoze
 if has("unix")
@@ -748,7 +802,6 @@ else
   map <unique> <script> <Plug>CleartoolGraphVerTree 
         \ :!start clearvtree.exe <c-r>=expand("<cfile>")<cr>
 endif
-
 " }}}
 " ===========================================================================
 "                                 End of Maps
@@ -793,6 +846,8 @@ if (has("gui_running") && &guioptions !~# "M") ||
         \ :cthist<cr>
   amenu 60.420 &Clearcase.&Describe<Tab>:ctdesc
         \ :ctdesc<cr>
+  amenu 60.421 &Clearcase.&Show\ Comment<Tab>:ctcmt
+        \ :ctcmt<cr>
   amenu 60.430 &Clearcase.&Version\ Tree<Tab>:ctxlsv
         \ :ctxlsv<cr>
   amenu 60.435 &Clearcase.-SEP4-        :
@@ -802,8 +857,9 @@ if (has("gui_running") && &guioptions !~# "M") ||
         \ :ctlsa<cr>
   amenu 60.460 &Clearcase.&Set\ Current\ Activity<Tab>:ctsta
         \ :ctsta<cr>
-  amenu 60.470 &Clearcase.&Create\ New\ Current\ Activity<Tab>:ctmka
+  amenu 60.470 &Clearcase.&Create\ New\ Activity<Tab>:ctmka
         \ :ctmka<cr>
+  amenu 60.480 &Clearcase.&Open\ Clearprojexp :call <SID>OpenProjExp()<cr>
   amenu 60.500 &Clearcase.-SEP2-        :
   amenu 60.510 &Clearcase.Di&ff<Tab>:ctdiff
         \ :ctdiff<cr>
@@ -820,6 +876,8 @@ if (has("gui_running") && &guioptions !~# "M") ||
         \ :ctcor<cr>
   amenu 60.560 &Clearcase.List\ Checkouts\ in\ VOB<Tab>:ctcov
         \ :ctcov<cr>
+  amenu 60.600 &Clearcase.-SEP5-        :
+  amenu 60.600 &Clearcase.&Help<Tab>:h\ ccase :h ccase<cr>
 endif
 " }}}
 
