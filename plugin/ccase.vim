@@ -1,12 +1,15 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        11-Sep-2002 14:58
+" Last Modified:        21-Oct-2002 07:56
 "
-" $Id: ccase.vim,v 1.30 2002/09/25 17:06:46 dp Exp $ }}}
+" $Id: ccase.vim,v 1.31 2002/10/21 12:01:25 dp Exp $ }}}
 "
 " Modifications: {{{
 " $Log: ccase.vim,v $
+" Revision 1.31  2002/10/21 12:01:25  dp
+" fix from Gary Johnson on cleartool describe, used to determine predecessor version for ctpdif, escaping missing on space in filename, seen on Windows.
+"
 " Revision 1.30  2002/09/25 17:06:46  dp
 " Added buffer local settings to set the current activity, and update the
 " checkout list window on BufEnter.  Also added ability to create an UCM
@@ -215,7 +218,7 @@ function! s:CtConsoleDiff( fname, ask_version )
 
     " Determine root of the filename.  Necessary when the file we are editting
     " already as an '@@' version qualifier.
-    let l:fname_and_ver = system('cleartool des -s -cview '.a:fname)
+    let l:fname_and_ver = system('cleartool des -s -cview "'.a:fname.'"')
     let l:fname_and_ver = substitute(l:fname_and_ver, "\n", "", "g")
 
     if (a:ask_version != 0)
