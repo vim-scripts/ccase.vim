@@ -1,12 +1,33 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        08-Dec-2003 10:23
+" Last Modified:        30-Aug-2004 10:46
 "
-" $Id: ccase.vim,v 1.36 2003/12/09 16:14:26 dp Exp $ }}}
+" GetLatestVimScripts: 15 1 ccase.vim
+"
+" $Id: ccase.vim,v 1.38 2004/09/03 20:26:10 dp Exp $ }}}
 "
 " Modifications: {{{
+" $Revision: 1.38 $
 " $Log: ccase.vim,v $
+" Revision 1.38  2004/09/03 20:26:10  dp
+" Added Change comment command, and added line for GetLatestVimScripts.
+"
+" Revision 1.37  2004/01/19 20:32:34  dp
+" added Revision keyword to header comment
+"
+" Revision 1.36ingo 12-Dec-2003 Ingo Karkat
+" - Fixed missing enclosing double quotes at :ctcmt command
+" - Modified :Ctci :Ctco :Ctcou :Ctmk commands which take an optional argument
+"   representing the comment. Corresponding s:Ct...() functions got an
+"   additional argument. 
+" - Had to remove some ':exec' at ':exec call "..."' command definitions,
+"   because the surrounding double quotes clashed with <f-args>; commands work
+"   without exec, anyway. Proably, ':exec' can be removed before all ':call'? 
+" - Added EscapeComments() function, which adds escaping of % and # characters
+"   to the already filtered | and !
+" - BF: changed s:comments to l:comments in CtCheckin()
+"
 " Revision 1.36  2003/12/09 16:14:26  dp
 " My changes:
 " Add User commands for all the regular cabbrevs used, so that diff
@@ -549,15 +570,7 @@ function! s:GetComment(text)
   if l:comment == ""
     return 1
   else
-    " Save this comment
-    " If comment entered, had double quotes in the text,
-    " escape them, so the when the:
-    " cleartool checkout -c "<comment_text>"
-    "
-    " is executed by the shell, it doesn't get confused by the extra quotes.
-    " Single quotes are OK, since the checkout shell command uses double quotes
-    " to surround the comment text.
-    let s:comment = substitute(l:comment, '"\|!', '\\\0', "g")
+    let s:comment = s:EscapeComments(l:comment)
 
     " Save the unescaped text
     let g:ccaseSaveComment = l:comment
@@ -567,7 +580,7 @@ function! s:GetComment(text)
 endfunction " s:GetComment
 
 " ===========================================================================
-function! s:CtMkelem(filename)
+function! s:CtMkelem(filename, ...)
 " Make the current file an element of the current directory.
 " ===========================================================================
   let l:retVal = 0
@@ -619,7 +632,15 @@ function! s:CtMkelem(filename)
   endif
 
   let l:comment = ""
-  if g:ccaseNoComment == 0
+  if a:0 == 1
+      let l:comment = s:EscapeComments(a:1)
+  elseif a:0 > 1
+      echohl Error
+      echomsg "This command requires either none or one argument!"
+      echohl None
+      return 1
+  endif
+  if (g:ccaseNoComment == 0) && (l:comment == "")
     " Make the file an element, ClearCase will prompt for comment
     if s:GetComment('Enter element creation comment: ') == 0
       let l:comment = s:comment
@@ -701,7 +722,65 @@ function! s:CtMkelem(filename)
 endfunction " s:CtMkelem
 
 " ===========================================================================
-function! s:CtCheckout(file, reserved)
+function! s:CtChangeCmt(file)
+" Allow user to modify element comment (checkout or checkin, whichever is most
+" recent.
+" ===========================================================================
+  let l:retVal = 0
+
+  if a:file == ""
+    let l:file = resolve (expand("%:p"))
+  else
+    let l:file = resolve (a:file)
+  endif
+
+  let l:comment = ""
+  if a:0 == 1
+      let l:comment = s:EscapeComments(a:1)
+  elseif a:0 > 1
+      echohl Error
+      echomsg "This command requires either none or one argument!"
+      echohl None
+      return 1
+  endif
+  if (g:ccaseNoComment == 0) && (l:comment == "")
+    if s:GetComment("Enter changed comment: ") == 0
+      let l:comment = s:comment
+    else
+      echohl WarningMsg
+      echomsg "Change comment canceled!"
+      echohl None
+      return 1
+    endif
+  endif
+  "
+  " Allow to use the default or no comment
+  if l:comment =~ "-nc" || l:comment == "" || l:comment == "."
+    let l:comment_flag = "-nc"
+  else
+    let l:comment_flag = "-c \"" . l:comment . "\""
+  endif
+
+  " Execute change command:
+  let l:ccase_command = "!cleartool chevent " . l:comment_flag . " \"" . l:file . '"'
+  exe l:ccase_command
+
+  " Check error status of the command and log result to message history:
+  if (v:shell_error)
+    echohl Error
+    echomsg "CCASE change comment failed: " . l:ccase_command
+    echohl None
+
+    return 1
+  else
+    echomsg "CCASE changed comment."
+  endif
+
+  return 0
+endfunction " s:CtChangeCmt
+
+" ===========================================================================
+function! s:CtCheckout(file, reserved, ...)
 " Function to perform a clearcase checkout for the current file
 " Return 0 if OK, 1 if failed.
 "
@@ -719,7 +798,15 @@ function! s:CtCheckout(file, reserved)
   endif
 
   let l:comment = ""
-  if g:ccaseNoComment == 0
+  if a:0 == 1
+      let l:comment = s:EscapeComments(a:1)
+  elseif a:0 > 1
+      echohl Error
+      echomsg "This command requires either none or one argument!"
+      echohl None
+      return 1
+  endif
+  if (g:ccaseNoComment == 0) && (l:comment == "")
     if s:GetComment("Enter checkout comment: ") == 0
       let l:comment = s:comment
     else
@@ -777,7 +864,7 @@ function! s:CtCheckout(file, reserved)
 endfunction " s:CtCheckout()
 
 " ===========================================================================
-function! s:CtCheckin(file)
+function! s:CtCheckin(file, ...)
 " Function to perform a clearcase checkin for the current file
 " Return 0 if OK, return 1 if failed.
 " ===========================================================================
@@ -788,7 +875,15 @@ function! s:CtCheckin(file)
   endif
 
   let l:comment = ""
-  if g:ccaseNoComment == 0
+  if a:0 == 1
+      let l:comment = s:EscapeComments(a:1)
+  elseif a:0 > 1
+      echohl Error
+      echomsg "This command requires either none or one argument!"
+      echohl None
+      return 1
+  endif
+  if (g:ccaseNoComment == 0) && (l:comment == "")
     if s:GetComment("Enter checkin comment: ") == 0
       let l:comment = s:comment
     else
@@ -800,7 +895,7 @@ function! s:CtCheckin(file)
   endif
 
   " Allow to use the default or no comment
-  if s:comment =~ "-nc" || s:comment == "" || s:comment == "."
+  if l:comment =~ "-nc" || l:comment == "" || l:comment == "."
     let l:ccase_command = "!cleartool ci -nc \"" . l:file . '"'
   else
     let l:ccase_command = "!cleartool ci -c \"" . l:comment .
@@ -909,7 +1004,7 @@ fun! s:MakeActiv()
     echohl None
   endif
 endfun " s:MakeActiv
-com! -nargs=0 -complete=command Ctmka exec "call <SID>MakeActiv()"
+com! -nargs=0 -complete=command Ctmka call <SID>MakeActiv()
 cab  ctmka  Ctmka
 
 " ===========================================================================
@@ -926,8 +1021,8 @@ fun! s:ListActiv(current_act)
     call s:CtCmd("!cleartool lsactiv -fmt \'\\%n\t\\%c\'", "activity_list")
   endif
 endfun " s:ListActiv
-com! -nargs=0 -complete=command Ctlsa exec "call <SID>ListActiv(\"\")"
-com! -nargs=0 -complete=command Ctlsc exec "call <SID>ListActiv(\"current\")"
+com! -nargs=0 -complete=command Ctlsa call <SID>ListActiv("")
+com! -nargs=0 -complete=command Ctlsc call <SID>ListActiv("current")
 cab ctlsa  Ctlsa
 cab ctlsc  Ctlsc
 
@@ -951,7 +1046,7 @@ fun! s:SetActiv(activity)
     echohl None
   endif
 endfun " s:SetActiv
-com! -nargs=0 -complete=command Ctsta exec "call <SID>SetActiv(\"\")"
+com! -nargs=0 -complete=command Ctsta call <SID>SetActiv("")
 cab  ctsta Ctsta
 
 " ===========================================================================
@@ -979,7 +1074,7 @@ fun! s:CtOpenProjExp()
     echohl None
   endif
 endfun " s:CtOpenProjExp
-com! -nargs=0 -complete=command Ctexp exec "call <SID>CtOpenProjExp()"
+com! -nargs=0 -complete=command Ctexp call <SID>CtOpenProjExp()
 cab ctexp Ctexp
 
 " ===========================================================================
@@ -1061,6 +1156,23 @@ fu! s:CtChangeActiv()
   call s:SetActiv(l:activity)
   bd
 endfun " s:CtChangeActiv
+
+" ===========================================================================
+fu! s:EscapeComments(comment)
+" Escape harmful characters in the entered comments, so that they can be
+" passed to the shell cleartool command. 
+" ===========================================================================
+  " Double quotes in comment must be escaped, because of the cleartool
+  " invocation via: 
+  " cleartool checkout -c "<comment_text>"
+  " Single quotes are OK, since the checkout shell command uses double quotes
+  " to surround the comment text.
+  let l:comment = substitute(a:comment, '"\|!', '\\\0', "g")
+  " Escape special Ex characters # and % (cp. :help cmdline-special)
+  " let l:comment = substitute(l:comment, '\(^\|[^\\]\)\&\([%#]\)', '\\\2', "g" )
+  let l:comment = escape(l:comment, '%#')
+  return l:comment
+endfun " s:EscapeComments
 
 " ===========================================================================
 function! s:OpenInNewWin(filename)
@@ -1205,35 +1317,35 @@ endfun " s:InstallDocumentation
 " {{{
 "     Make current file an element in the vob
 cab  ctmk   call <SID>CtMkelem(expand("%"))
-com! -nargs=0 -complete=command Ctmk exec "call <SID>CtMkelem(expand(\"%\"))"
+com! -nargs=? -complete=command Ctmk call <SID>CtMkelem(expand("%"), <f-args>)
 
 "     Abbreviate cleartool
 cab  ct     !cleartool
 "     check-out buffer (w/ edit afterwards to get rid of RO property)
 cab  ctco   call <SID>CtCheckout('', "r")
-com! -nargs=0 -complete=command Ctco exec "call <SID>CtCheckout('', \"r\")"
+com! -nargs=? -complete=command Ctco call <SID>CtCheckout('', "r", <f-args>)
 "     check-out buffer (...) unreserved
 cab  ctcou  call <SID>CtCheckout('', "u")
-com! -nargs=0 -complete=command Ctcou exec "call <SID>CtCheckout('', \"u\")"
+com! -nargs=? -complete=command Ctcou call <SID>CtCheckout('', "u", <f-args>)
 "     check-in buffer (w/ edit afterwards to get RO property)
 cab  ctci   call <SID>CtCheckin('')
-com! -nargs=0 -complete=command Ctci exec "call <SID>CtCheckin('')"
+com! -nargs=? -complete=command Ctci call <SID>CtCheckin('', <f-args>)
 "     uncheckout buffer (w/ edit afterwards to get RO property)
 cab  ctunco call <SID>CtUncheckout('')
-com! -nargs=0 -complete=command Ctunco exec "call <SID>CtUncheckout('')"
+com! -nargs=0 -complete=command Ctunco call <SID>CtUncheckout('')
 "     Diff buffer with predecessor version
 cab  ctpdif call <SID>CtConsoleDiff('', 1)<cr>
-com! -nargs=0 -complete=command Ctpdif exec "call <SID>CtConsoleDiff('', 1)"
+com! -nargs=0 -complete=command Ctpdif call <SID>CtConsoleDiff('', 1)
 "     Diff buffer with the first version on the current branch:
-com! -nargs=0 -complete=command Ct0dif exec "call <SID>CtConsoleDiff('', 2)"
+com! -nargs=0 -complete=command Ct0dif call <SID>CtConsoleDiff('', 2)
 cab  ct0dif Ct0dif
 cab  ctbdif Ct0dif
 "     Diff buffer with the closest common ancestor version with main branch:
 cab  ctmdif call <SID>CtConsoleDiff('', 3)<cr>
-com! -nargs=0 -complete=command Ctmdif exec "call <SID>CtConsoleDiff('', 3)"
+com! -nargs=0 -complete=command Ctmdif call <SID>CtConsoleDiff('', 3)
 "     Diff buffer with queried version
 cab  ctqdif call <SID>CtConsoleDiff('', 0)<cr>
-com! -nargs=0 -complete=command Ctqdif exec "call <SID>CtConsoleDiff('', 0)"
+com! -nargs=0 -complete=command Ctqdif call <SID>CtConsoleDiff('', 0)
 "     describe buffer
 cab  ctdesc !cleartool describe "%"
 com! -nargs=0 -complete=command Ctdesc exec "!cleartool describe ".expand("%")
@@ -1258,11 +1370,13 @@ cab  ctcov  call <SID>CtCmd("!cleartool lsco -short -cview ".
 com! -nargs=0 -complete=command Ctcov exec 
       \ "call <SID>CtCmd(\"!cleartool lsco -short -cview \".
       \ <SID>CtMeStr().\" -avob\", \"checkouts_allvobs\")"
-cab  ctcmt  !cleartool describe -fmt "Comment:\n'\%c'" %
+cab  ctcmt  !cleartool describe -fmt "Comment:\n'\%c'" "%"
 com! -nargs=0 -complete=command Ctcmt exec
-      \ "!cleartool describe -fmt \"Comment:\n'\%c'\" ".expand("%")
+      \ "!cleartool describe -fmt \"Comment:\\n'\\%c'\" ".expand("%")
+cab  ctchc call <SID>CtChangeCmt('')
+com! -nargs=? -complete=command Ctchc call <SID>CtChangeCmt ('', <f-args>)
 cab  ctann  call <SID>CtAnnotate('')
-com! -nargs=0 -complete=command Ctann exec "call <SID>CtAnnotate('')"
+com! -nargs=0 -complete=command Ctann call <SID>CtAnnotate('')
 
 "       These commands don't work the same on UNIX vs. WinDoze
 if has("unix")
@@ -1317,7 +1431,7 @@ cab  ctxlsv Ctxlsv
 cab  ctdiff Ctdiff
 "     Give the current viewname
 "cab  ctpwv call <SID>CtShowViewName()<CR>
-com! -nargs=0 -complete=command Ctpwv exec "call <SID>CtShowViewName()"
+com! -nargs=0 -complete=command Ctpwv call <SID>CtShowViewName()
 cab  ctpwv Ctpwv
 
 " }}}
@@ -1494,7 +1608,9 @@ if (has("gui_running") && &guioptions !~# "M") ||
         \ :ctpwv<cr>
   amenu 60.422 &Clearcase.&Show\ Comment<Tab>:ctcmt
         \ :ctcmt<cr>
-  amenu 60.423 &Clearcase.&Annotate<Tab>:ctann
+  amenu 60.423 &Clearcase.&Change\ Comment<Tab>:ctchc
+        \ :ctchc<cr>
+  amenu 60.424 &Clearcase.&Annotate<Tab>:ctann
         \ :ctann<cr>
   amenu 60.430 &Clearcase.&Version\ Tree<Tab>:ctxlsv
         \ :ctxlsv<cr>
@@ -1550,7 +1666,7 @@ endif
 " {{{
 " Current revision:
 let s:revision =
-  \ substitute("$Revision: 1.36 $",'\$\S*: \([.0-9]\+\) \$','\1','')
+  \ substitute("$Revision: 1.38 $",'\$\S*: \([.0-9]\+\) \$','\1','')
 
 " Install the document:
 " NOTE: We must detect script name here. In a function, <sfile> will be
@@ -1572,7 +1688,7 @@ finish
 
 === START_DOC
 *ccase.txt*	For Vim version 6.0 and up                           #version#
-             LAST MODIFICATION: "Tue, 09 Dec 2003 11:05:13 (dp)"
+             LAST MODIFICATION: "Fri, 03 Sep 2004 16:25:08 (dp)"
 
 
 		  VIM REFERENCE MANUAL    by Douglas Potts
