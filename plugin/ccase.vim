@@ -1,10 +1,10 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        01-Oct-2001 13:30
-" Version:              1.3 (Vim-Online version)
+" Last Modified:        01-Oct-2001 15:53
+" Version:              1.4 (Vim-Online version)
 "
-" $Id: ccase.vim,v 1.7 2001/10/01 17:31:16 dp Exp $
+" $Id: ccase.vim,v 1.8 2001/10/01 19:50:01 dp Exp $
 " TODO:  Revise output capture method to use redir to put shell output into a
 "        register, and open a unmodifiable buffer to put it in.
 " TODO:  Add some of my other functions for doing a diff between current file
@@ -14,33 +14,6 @@
 " $Log: ccase.vim,v $
 " Revision 1.7  2001/10/01 17:31:16  dp
 "  Added full mkelem functionality and cleaned up header comments some.
-"
-" Revision 1.6  2001/10/01 12:41:55  dp
-" *** empty log message ***
-"
-" Revision 1.5  2001/09/28 20:10:53  dp
-" *** empty log message ***
-"
-" Revision 1.4  2001/09/28 12:50:56  dp
-" *** empty log message ***
-"
-" Revision 1.3  2001/09/28 12:04:00  dp
-" *** empty log message ***
-"
-" Revision 1.2  2001/09/26 14:59:57  dp
-" *** empty log message ***
-"
-" Revision 1.1.1.1  2001/09/10 15:13:17  dp
-" Importing sources
-"
-" Revision 1.7  2001/09/07 14:01:32  dp
-" Change $Rev to $Revision
-"
-" Revision 1.6  2001/09/07 14:01:10  dp
-" *** empty log message ***
-"
-" Revision 1.5  2001/09/07 13:59:24  dp
-" Changed how Version is determined
 "
 " Revision 1.4  2001/09/07 13:56:39  dp
 " Removed '-nc' so that user will now be prompted for checkin and checkout
@@ -71,10 +44,10 @@ let def_statusline="%<%f%h%m%r%=%{$view}\ %{&ff}\ %l,%c%V\ %P"
 " create dummy entry so no warning message come up if they are already gone.
 " DLP - I have cvsmenu.vim and rcs-menu.vim in my plugins directory, only
 "       need one Version Control at a time though.
-"amenu &CVS.dummy echo "dummy"<cr>
-"aunmenu CVS
-"amenu &RCS.dummy echo "dummy"<cr>
-"aunmenu RCS
+amenu &CVS.dummy echo "dummy"<cr>
+aunmenu CVS
+amenu &RCS.dummy echo "dummy"<cr>
+aunmenu RCS
 
 " If not already found elsewhere.
 if !exists("*OpenIfNew")
@@ -140,7 +113,8 @@ function! s:CtMkelem(filename)
       execute "!cleartool co ".elem_basename
 
       " Check that directory actually got checked out
-      if call <SID>IsCheckedout(elem_basename) == 0
+      let isCheckedOut = <SID>IsCheckedout(elem_basename)
+      if isCheckedOut == 0
         echo "\nERROR!  Exitting, unable to checkout directory.\n"
         return
       endif
