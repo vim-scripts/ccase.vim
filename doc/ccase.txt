@@ -1,5 +1,5 @@
 *ccase.txt*                  For Vim version 6.0.
-             LAST MODIFICATION: "Fri, 05 Apr 2002 16:52:10 (dp)"
+             LAST MODIFICATION: "Tue, 13 Aug 2002 09:40:37 (dp)"
 
 
 		  VIM REFERENCE MANUAL    by Douglas Potts
@@ -61,26 +61,25 @@ directory.
 							*:ctcor*
 List the checkouts for the current user, for this view, in the current working
 directory, and all of it's subdirectories.  This redirects the output from the
-"cleartool lsco" command to a results file |g:ccaseTmpFile|, and splits the
-window, and opens the results file in that new window.
+"cleartool lsco" command to a results file, and splits the window, and opens
+the results file in that new window.
 
 							*:ctcov*
 List the checkouts for the current user, for this view, in any VOB.  This
-redirects the output from the "cleartool lsco" command to a results file
-|g:ccaseTmpFile|, and splits the window, and opens the results file in that
-new window.
+redirects the output from the "cleartool lsco" command to a results file, and
+splits the window, and opens the results file in that new window.
 
 
 Uncommmon Commands:~
 							*:cthist*
 List the version history for the current file.  This redirects the output from
-the "cleartool lshist" command to a results file |g:ccaseTmpFile|, and splits
-the window, and opens the results file in that new window.
+the "cleartool lshist" command to a results file, and splits the window, and
+opens the results file in that new window.
 
 							*:ctdesc*
 Lists the element description for the current file.  This redirects the output
-from the "cleartool describe" command to a results file |g:ccaseTmpFile|, and
-splits the window, and opens the results file in that new window.
+from the "cleartool describe" command to a results file, and splits the
+window, and opens the results file in that new window.
 
 							*:ctpwv*
 Echo the current working view to the status line.
@@ -201,10 +200,9 @@ Or for a temporary change, from the command line: >
 String         		(Unix default:          "/tmp/results.txt"
 			 Windows/DOS default:   "c:\temp\results.txt")
 
-Filename (including path) in which to redirect output from shell commands.
-Used in |:cthist| to redirect output from ClearCase command into a file, and
-that file is opened to display the results, and allow for operations on those
-results.
+As of version 1.25, this setting is obsolete.  The plugin now uses the
+built-in Vim function tempname to generate the name for the output capture
+file, and that is now read into a "ccase_results" special buffer.
 
                                                       *g:ccaseUseDialog*
 Integer boolean		(default for gvim:  1=Use a dialog box for input,

@@ -1,13 +1,22 @@
 " rc file for VIM, clearcase extensions {{{
 " Author:               Douglas L. Potts
 " Created:              17-Feb-2000
-" Last Modified:        05-Apr-2002 16:49
+" Last Modified:        13-Aug-2002 09:35
 " Version:              1.11
 "
-" $Id: ccase.vim,v 1.22 2002/04/05 21:43:02 dp Exp $
+" $Id: ccase.vim,v 1.25 2002/08/13 13:39:13 dp Exp $
 "
 " Modifications:
 " $Log: ccase.vim,v $
+" Revision 1.25  2002/08/13 13:39:13  dp
+" added results buffer capability similar to VTreeExplorer and other recent plugins, eliminates possible naming collisions between multiple users of the plugin on a shared system (ie. Unix/Linux).
+"
+" Revision 1.24  2002/08/08 20:11:38  dp
+" *** empty log message ***
+"
+" Revision 1.23  2002/04/08 14:52:34  dp
+" Added checkout unreserved, menus, mappings, etc.
+"
 " Revision 1.22  2002/04/05 21:43:02  dp
 " Added capability to checkout a file unreserved, either via 'cab' command line,
 " or menu.
@@ -55,6 +64,11 @@
 "
 " TODO:  Revise output capture method to use redir to put shell output into a
 "        register, and open a unmodifiable buffer to put it in.
+" TODO:  Find a way to wrap up checkin/checkout operations with the file
+"        explorer plugin.
+" TODO:  Allow visual selections in results windows to be piped into requested
+"        command. (ie on a list of checkouts, select multiple files to check
+"        back in).
 " DONE:  Intelligently escape quotes in comments inputted, so it doesn't confuse
 "        ClearCase when the shell command is run.   (18-Jan-2002)
 "
@@ -69,14 +83,21 @@ let g:loaded_ccase = 1
 "                           Setup Default Behaviors
 " ===========================================================================
 "{{{
-" Default name for temporary file for output redirection
-if !exists("g:ccaseTmpFile")
-  if has("unix")
-    let g:ccaseTmpFile = "/tmp/results.txt"
-  else
-    let g:ccaseTmpFile = "c:\\temp\\results.txt"
-  endif
+
+" If using compatible, get out of here
+if &cp
+  echohl Error
+  echo "Cannot load ccase.vim with 'compatible' option set!"
+  echohl None
+  finish
 endif
+
+" TODO:  Work in using this mapping for the results window if window has the
+"        list of activities in it.
+"nmap <buffer> <2-leftmouse> :call <SNR>22_SetActiv("<c-r>=expand("<cWORD>")<cr>")<cr>
+" TODO:  If in a listing of checkouts, allow double-click to split-open
+"        the file under the cursor
+"nmap <buffer> <2-leftmouse> <c-w>f
 
 " If the *GUI* is running, either use the dialog box or regular prompt
 if !exists("g:ccaseUseDialog")
@@ -398,10 +419,21 @@ fun! s:ListActiv(current_act)
     let s:tmp = substitute(@", "\n", "", "g")
     echo s:tmp
   else
-    exe '!cleartool lsactiv -short > '.g:ccaseTmpFile
-    exe 'sp '.g:ccaseTmpFile
+    let tmpFile = tempname()
+    exe '!cleartool lsactiv -short > '.tmpFile
+    " id: unique "string" id
+    " split:
+    "     0 -- don't split
+    "     1 -- split horizontally
+    "     2 -- split vertically
+    " clear: if the buffer should be cleared, if it
+    "        already exists (usually set to 1)
+    exe 'sp '.tmpFile
+    " call ScratchBuffer(1, 1, 1)
+    " exe '0r '.tmpFile
+    " exe '!rm -f '.tmpFile
   endif
-endfun
+endfun " s:ListActiv
 cab  ctlsa  call <SID>ListActiv("")<CR>
 cab  ctlsc  call <SID>ListActiv("current")
 
@@ -424,8 +456,48 @@ fun! s:SetActiv(activity)
     echo "Not changing activity!"
     echohl None
   endif
-endfun
+endfun " s:SetActiv
 cab  ctsta call <SID>SetActiv("")
+
+" ===========================================================================
+fun! s:CtCmd(cmd_string)
+" Execute ClearCase 'cleartool' command, and put the output into a results
+" buffer.
+" ===========================================================================
+  if a:cmd_string != ""
+    let tmpFile = tempname()
+
+    " Capture output in a generated temp file
+    exe a:cmd_string." > ".tmpFile
+    
+    " Now see if a results window is already there
+    if bufnr("[ccase_results]") > 0
+      silent exe "bd! [ccase_results]"
+    endif
+
+    " Open a new results buffer
+    silent exe "new [ccase_results]"
+    "
+    " Read in the output from our command
+    silent exe "0r ".tmpFile
+
+    " Setup the buffer to be a "special buffer"
+    " thanks to T. Scott Urban here, I modeled my settings here off of his code
+    " for VTreeExplorer
+    setlocal noswapfile
+    setlocal buftype=nowrite
+    setlocal bufhidden=delete " d
+    setlocal nomodifiable
+
+    " Get rid of temp file
+    if has('unix')
+      silent exe "!rm ".tmpFile
+    else
+      silent exe "!del ".tmpFile
+    endif
+  endif
+endfun " s:CtCmd
+
 " }}}
 " ===========================================================================
 "                         End of Function Definitions
@@ -460,20 +532,16 @@ cab  ctver  !cleartool describe -aattr version %
 "     List my checkouts in the current view and directory
 cab  ctcoc  !cleartool lsco -cview -short -me
 "     List my checkouts in the current view and directory, and it's sub-dir's
-cab  ctcor  !cleartool lsco -cview -short -me -recurse 
-      \ > <C-R>=ccaseTmpFile<CR><CR>:call OpenIfNew(ccaseTmpFile)<CR>
+cab  ctcor  call <SID>CtCmd("!cleartool lsco -cview -short -me -recurse")<CR>
 "     List all my checkouts in the current view (ALL VOBS)
-cab  ctcov  !cleartool lsco -avob -cview -short -me 
-      \ > <C-R>=ccaseTmpFile<CR><CR>:call OpenIfNew(ccaseTmpFile)<CR>
+cab  ctcov  call <SID>CtCmd("!cleartool lsco -avob -cview -short -me")
 
 "       These commands don't work the same on UNIX vs. WinDoze
 if has("unix")
   "     buffer text version tree
-  cab  cttree !cleartool lsvtree -all -merge %
-        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
+  cab  cttree call <SID>CtCmd("!cleartool lsvtree -all -merge ".expand("%"))<CR>
   "     buffer history
-  cab  cthist !cleartool lshistory %
-        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
+  cab  cthist call <SID>CtCmd("!cleartool lshistory ".expand("%"))<CR>
   "     xlsvtree on buffer
   cab  ctxlsv !xlsvtree % &<CR>
   "     xdiff with predecessor
@@ -482,11 +550,9 @@ if has("unix")
   cab  ctpwv echohl Question\|echo "Current view is: "$view\|echohl None
 else
   "     buffer text version tree
-  cab  cttree !cleartool lsvtree -all -merge %
-        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
+  cab  cttree call <SID>CtCmd("!cleartool lsvtree -all -merge ".expand("%"))<CR>
   "     buffer history
-  cab  cthist !cleartool lshistory %
-        \ > <C-R>=ccaseTmpFile<CR><CR>:sp <C-R>=ccaseTmpFile<CR><CR>
+  cab  cthist call <SID>CtCmd("!cleartool lshistory ".expand("%"))<CR>
   "     xlsvtree on buffer
   cab  ctxlsv !start clearvtree.exe %<cr>
   "     xdiff with predecessor
@@ -548,8 +614,7 @@ map <unique> <script> <Plug>CleartoolUnCheckout
       \ :!cleartool unco -rm <c-r>=expand("<cfile>")<cr>
 
 map <unique> <script> <Plug>CleartoolListHistory
-      \ :!cleartool lshistory <c-r>=expand("<cfile>")<cr>
-      \ > <C-R>=ccaseTmpFile<CR><CR>:call OpenIfNew(ccaseTmpFile)<CR>
+      \ :call <SID>CtCmd("!cleartool lshistory ".expand("<cfile>"))<cr>
 
 map <unique> <script> <Plug>CleartoolConsolePredDiff
       \ :call <SID>CtConsoleDiff('<c-r>=expand("<cfile>")<cr>', 0)<cr>
